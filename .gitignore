@@ -1,18 +1,35 @@
-# python
+# --- python ---
 __pycache__/
 *.py[cod]
 .venv/
 .pytest_cache/
 *.egg-info/
 
-# окружение и секреты
+# --- node ---
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.vite/
+
+# --- окружение и секреты ---
 .env
+*.env.local
 backend/.env
+frontend/.env
 nginx/certs/
 nginx/certbot/
+storage/global.config.json
 
-# локальные данные
+# --- сборки и локальные данные ---
+frontend/dist/
 backend/dev.db
 backend/.sites/
-frontend/dist/
-storage/global.config.json
+
+# --- редакторы и ОС ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# артефакт tsc -b
+frontend/tsconfig.tsbuildinfo

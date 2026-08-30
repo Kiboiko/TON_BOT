@@ -13,6 +13,7 @@ import signal
 
 from app.core.config import settings
 from app.core.db import SessionLocal
+from app.services.notifications import close_transport
 from app.services.subscriptions import refresh_statuses
 
 logging.basicConfig(
@@ -78,6 +79,7 @@ async def run() -> None:
             await asyncio.wait_for(stopping.wait(), timeout=settings.SCHEDULER_INTERVAL)
         except asyncio.TimeoutError:
             pass
+    await close_transport()
     log.info("scheduler stopped")
 
 

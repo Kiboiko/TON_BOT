@@ -9,6 +9,7 @@ import logging
 import signal
 
 from app.core.config import settings
+from app.services.notifications import close_transport
 from app.services.publishing import JOB_PUBLISH_SITE, run_publish_job
 from app.workers.queue import Job, close_queue, get_queue
 
@@ -62,6 +63,7 @@ async def run() -> None:
                 await requeue(job)
 
     await close_queue()
+    await close_transport()
     log.info("publish worker stopped")
 
 

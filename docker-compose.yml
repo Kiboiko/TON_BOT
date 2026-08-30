@@ -43,6 +43,7 @@ services:
   migrate:
     <<: *backend
     command: sh -c "alembic upgrade head && python -m app.seed"
+    healthcheck: {disable: true}
     restart: "no"
 
   backend:
@@ -58,6 +59,7 @@ services:
   worker:
     <<: *backend
     command: python -m app.workers.publish_worker
+    healthcheck: {disable: true}
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -67,6 +69,7 @@ services:
   scheduler:
     <<: *backend
     command: python -m app.workers.scheduler
+    healthcheck: {disable: true}
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -76,6 +79,7 @@ services:
   bot:
     <<: *backend
     command: python -m app.bot.main
+    healthcheck: {disable: true}
     depends_on:
       postgres: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}

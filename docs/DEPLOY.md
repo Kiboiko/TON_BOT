@@ -140,8 +140,21 @@ docker compose logs -f backend
 
 ## Шаг 9. Фронтенд Mini App
 
-Сборку Разработчика B положите в `./frontend/dist` — nginx отдаёт её с корня,
-а `/api/*` проксирует в backend. После обновления сборки: `docker compose restart nginx`.
+```bash
+sudo apt install -y nodejs npm      # либо nvm с Node 20+
+cd /opt/ton-site-builder/frontend
+cp .env.example .env                # VITE_API_BASE оставьте пустым: тот же origin
+nano .env                           # VITE_TONCONNECT_MANIFEST=/tonconnect-manifest.json
+npm ci
+npm run build                       # результат в frontend/dist
+cd .. && docker compose restart nginx
+```
+
+nginx отдаёт `frontend/dist` с корня домена, а `/api/*` проксирует в backend.
+
+Отредактируйте `frontend/public/tonconnect-manifest.json` перед сборкой: поля
+`url` и `iconUrl` должны указывать на ваш боевой домен, иначе кошельки откажутся
+подключаться.
 
 ## Шаг 10. Приёмка
 

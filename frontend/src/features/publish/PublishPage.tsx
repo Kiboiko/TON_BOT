@@ -1,0 +1,323 @@
+/**
+ * B6. Флоу публикации: домен → деплой зоны через TON Connect → публикация
+ * с поллингом статуса → привязка bag id к домену.
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { ApiError } from "../../api/client";
+import { domainsApi, sitesApi } from "../../api/endpoints";
+import type { DomainCheck, Site, SiteStatus } from "../../api/types";
+import { Badge, Button, Field, Input, Loading, Notice, Segmented } from "../../components/ui";
+import { useAppStore } from "../../store/app";
+import { haptic, showBackButton } from "../../telegram/webapp";
+import { useTonPayment } from "../payments/useTonPayment";
+
+const DOMAIN_RE = /^[a-z0-9][a-z0-9-]{2,124}$/;
+const POLL_INTERVAL = 2500;
+
+export function PublishPage() {
+  const { siteId = "" } = useParams();
+  const navigate = useNavigate();
+  const { t } = useTranslation();
+  const toast = useAppStore((s) => s.toast);
+  const toastError = useAppStore((s) => s.toastError);
+  const payment = useTonPayment();
+
+  const [site, setSite] = useState<Site | null>(null);
+  const [status, setStatus] = useState<SiteStatus | null>(null);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [bagId, setBagId] = useState<string | null>(null);
+
+  const [name, setName] = useState("");
+  const [mode, setMode] = useState<"proxy" | "sbt">("proxy");
+  const [check, setCheck] = useState<DomainCheck | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => showBackButton(() => navigate(`/sites/${siteId}`)), [navigate, siteId]);
+
+  useEffect(() => {
+    sitesApi
+      .get(siteId)
+      .then(({ site: loaded }) => {
+        setSite(loaded);
+        setStatus(loaded.status);
+        setBagId(loaded.storage_bag_id);
+        if (loaded.domain) setName(loaded.domain.split(".")[0]);
+        if (loaded.status === "publishing") startPolling();
+      })
+      .catch(toastError);
+    return () => {
+      if (pollTimer.current) clearTimeout(pollTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [siteId]);
+
+  const startPolling = useCallback(() => {
+    if (pollTimer.current) clearTimeout(pollTimer.current);
+    const tick = async () => {
+      try {
+        const result = await sitesApi.publishStatus(siteId);
+        setStatus(result.status);
+        setBagId(result.storage_bag_id);
+        setPublishError(result.error);
+        if (result.status === "publishing") {
+          pollTimer.current = setTimeout(() => void tick(), POLL_INTERVAL);
+        } else if (result.status === "published") {
+          haptic.success();
+          toast(t("publish.published"), "success");
+        } else if (result.status === "publish_error") {
+          haptic.error();
+        }
+      } catch (error) {
+        toastError(error);
+      }
+    };
+    pollTimer.current = setTimeout(() => void tick(), POLL_INTERVAL);
+  }, [siteId, t, toast, toastError]);
+
+  const nameValid = DOMAIN_RE.test(name.trim().toLowerCase());
+
+  async function checkDomain(): Promise<void> {
+    if (!nameValid) return;
+    setChecking(true);
+    try {
+      setCheck(await domainsApi.check(name.trim().toLowerCase()));
+    } catch (error) {
+      toastError(error);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function attachDomain(): Promise<void> {
+    try {
+      const { transaction } = await domainsApi.deployZone({
+        site_id: siteId,
+        domain: name.trim().toLowerCase(),
+        tld: "ton",
+        mode,
+      });
+      const result = await payment.pay(transaction, (txHash) =>
+        domainsApi.confirm({ site_id: siteId, tx_hash: txHash }),
+      );
+      if (result) {
+        toast(t("domain.attached"), "success");
+        const { site: updated } = await sitesApi.get(siteId);
+        setSite(updated);
+        setStatus(updated.status);
+        if (updated.status === "publishing") startPolling();
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "WALLET_NOT_CONNECTED") {
+        payment.connect();
+        return;
+      }
+      toastError(error);
+    }
+  }
+
+  async function publish(): Promise<void> {
+    setPublishing(true);
+    setPublishError(null);
+    try {
+      await sitesApi.publish(siteId);
+      setStatus("publishing");
+      startPolling();
+    } catch (error) {
+      if (error instanceof ApiError && error.isPaymentRelated) {
+        toast(t("publish.subscriptionRequired"), "error");
+        navigate("/tariffs");
+        return;
+      }
+      toastError(error);
+    } finally {
+      setPublishing(false);
+    }
+  }
+
+  async function bindDns(): Promise<void> {
+    try {
+      const { transaction } = await sitesApi.dnsBind(siteId);
+      const result = await payment.pay(transaction, async () => ({ ok: true }));
+      if (result) toast(t("publish.bound"), "success");
+    } catch (error) {
+      toastError(error);
+    }
+  }
+
+  if (!site) return <Loading text={t("common.loading")} />;
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <div className="grow">
+          <h1>{t("publish.title")}</h1>
+          <div className="page-subtitle">{site.title}</div>
+        </div>
+        {status ? (
+          <Badge
+            kind={
+              status === "published"
+                ? "success"
+                : status === "publish_error"
+                  ? "danger"
+                  : status === "publishing"
+                    ? "accent"
+                    : "default"
+            }
+          >
+            {t(`sites.status.${status}`)}
+          </Badge>
+        ) : null}
+      </div>
+
+      {/* --- домен --- */}
+      <div className="card">
+        <div className="card-title">{t("domain.title")}</div>
+        <div className="card-sub" style={{ marginBottom: 10 }}>
+          {t("domain.subtitle")}
+        </div>
+
+        {site.domain ? (
+          <div className="row-between">
+            <div>
+              <div className="card-sub">{t("domain.current")}</div>
+              <b>{site.domain}</b>
+            </div>
+            <Badge kind="success">✓</Badge>
+          </div>
+        ) : (
+          <>
+            <Field error={name && !nameValid ? t("domain.invalid") : undefined}>
+              <div className="row">
+                <div className="grow">
+                  <Input
+                    value={name}
+                    onChange={(value) => {
+                      setName(value.toLowerCase());
+                      setCheck(null);
+                    }}
+                    placeholder={t("domain.placeholder")}
+                    invalid={Boolean(name) && !nameValid}
+                  />
+                </div>
+                <span className="card-sub">.ton</span>
+                <Button size="sm" loading={checking} disabled={!nameValid} onClick={() => void checkDomain()}>
+                  {t("domain.check")}
+                </Button>
+              </div>
+            </Field>
+
+            {check ? (
+              <div style={{ marginTop: 8 }}>
+                <Badge kind={check.available ? "success" : "danger"}>
+                  {check.available ? t("domain.available") : t("domain.taken")}
+                </Badge>
+              </div>
+            ) : null}
+
+            <div style={{ marginTop: 12 }}>
+              <div className="field-label">{t("domain.mode")}</div>
+              <Segmented<"proxy" | "sbt">
+                value={mode}
+                onChange={setMode}
+                options={[
+                  { value: "proxy", label: t("domain.modeProxy") },
+                  { value: "sbt", label: t("domain.modeSbt") },
+                ]}
+              />
+            </div>
+
+            <div style={{ marginTop: 12 }}>
+              {payment.isConnected ? (
+                <Button
+                  variant="primary"
+                  block
+                  disabled={!check?.available}
+                  loading={payment.stage === "signing" || payment.stage === "confirming"}
+                  onClick={() => void attachDomain()}
+                >
+                  {t("domain.deploy")}
+                </Button>
+              ) : (
+                <Button variant="primary" block onClick={payment.connect}>
+                  {t("domain.connectWallet")}
+                </Button>
+              )}
+            </div>
+            {payment.stage === "confirming" ? <Notice>{t("domain.waiting")}</Notice> : null}
+          </>
+        )}
+      </div>
+
+      {/* --- публикация --- */}
+      <div className="card">
+        <div className="card-title">{t("publish.title")}</div>
+
+        {status === "publishing" ? (
+          <>
+            <div className="center">
+              <div className="spinner spinner-lg" />
+              <div>{t("publish.publishing")}</div>
+            </div>
+            <div className="card-sub">{t("publish.publishingHint")}</div>
+          </>
+        ) : null}
+
+        {status === "published" ? (
+          <>
+            <div className="row" style={{ marginTop: 8 }}>
+              <Badge kind="success">✓ {t("publish.published")}</Badge>
+            </div>
+            {site.published_at ? (
+              <div className="card-sub" style={{ marginTop: 6 }}>
+                {t("publish.publishedAt", {
+                  date: new Date(site.published_at).toLocaleString(),
+                })}
+              </div>
+            ) : null}
+            {bagId ? (
+              <div style={{ marginTop: 8 }}>
+                <div className="card-sub">{t("publish.bagId")}</div>
+                <div className="mono">{bagId}</div>
+              </div>
+            ) : null}
+            {site.domain ? (
+              <div style={{ marginTop: 12 }}>
+                <div className="card-sub" style={{ marginBottom: 6 }}>
+                  {t("publish.bindHint")}
+                </div>
+                <Button block onClick={() => void bindDns()}>
+                  🔗 {t("publish.bindDns")}
+                </Button>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+
+        {status === "publish_error" ? (
+          <Notice kind="danger">
+            {t("publish.error")}
+            {publishError ? <div className="mono">{publishError}</div> : null}
+          </Notice>
+        ) : null}
+
+        {status !== "publishing" ? (
+          <div style={{ marginTop: 12 }}>
+            <Button variant="primary" block loading={publishing} onClick={() => void publish()}>
+              {status === "published" || status === "publish_error"
+                ? t("publish.retry")
+                : t("editor.publish")}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+
+      <Notice>{t("publish.trialNotice")}</Notice>
+    </div>
+  );
+}
