@@ -1,0 +1,117 @@
+name: ton-site-builder
+
+x-backend: &backend
+  build:
+    context: ./backend
+  env_file: [./backend/.env]
+  depends_on:
+    postgres: {condition: service_healthy}
+    redis: {condition: service_healthy}
+  volumes:
+    - sites_data:/data/sites
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ton}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ton}
+      POSTGRES_DB: ${POSTGRES_DB:-ton_builder}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ton} -d ${POSTGRES_DB:-ton_builder}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # Миграции и наполнение тарифов. Отрабатывает один раз при каждом запуске стека.
+  migrate:
+    <<: *backend
+    command: sh -c "alembic upgrade head && python -m app.seed"
+    restart: "no"
+
+  backend:
+    <<: *backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
+    expose: ["8000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+
+  # Воркер публикации: рендер сайта и заливка в TON Storage
+  worker:
+    <<: *backend
+    command: python -m app.workers.publish_worker
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+
+  # Планировщик подписок: expiring_soon / expired, снятие сайтов с публикации
+  scheduler:
+    <<: *backend
+    command: python -m app.workers.scheduler
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+
+  # Telegram-бот уведомлений
+  bot:
+    <<: *backend
+    command: python -m app.bot.main
+    depends_on:
+      postgres: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+
+  # TON Storage daemon. Общий том с backend: демон забирает готовые каталоги сайтов.
+  # Образ собирается из официальных исходников ton — см. docs/DEPLOY.md, шаг 7.
+  storage-daemon:
+    image: ${TON_STORAGE_IMAGE:-ghcr.io/ton-blockchain/ton-storage-daemon:latest}
+    command: >
+      storage-daemon -v 3 -C /var/ton-work/global.config.json
+      -I 0.0.0.0:3333 -p 5555 -D /var/ton-work/storage
+    volumes:
+      - sites_data:/data/sites
+      - storage_data:/var/ton-work/storage
+      - ./storage/global.config.json:/var/ton-work/global.config.json:ro
+    ports:
+      - "3333:3333/udp"
+    restart: unless-stopped
+    profiles: ["storage"]
+
+  nginx:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - ./nginx/certbot:/var/www/certbot
+      # сборка Mini App Разработчика B
+      - ./frontend/dist:/var/www/miniapp:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on: [backend]
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  redis_data:
+  sites_data:
+  storage_data:

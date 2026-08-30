@@ -1,0 +1,18 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# окружение и секреты
+.env
+backend/.env
+nginx/certs/
+nginx/certbot/
+
+# локальные данные
+backend/dev.db
+backend/.sites/
+frontend/dist/
+storage/global.config.json
