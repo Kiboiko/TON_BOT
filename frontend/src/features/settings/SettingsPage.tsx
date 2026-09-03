@@ -29,7 +29,10 @@ export function SettingsPage() {
   const toastError = useAppStore((s) => s.toastError);
 
   const [proofPending, setProofPending] = useState(false);
-  const provedFor = useRef<string | null>(null);
+  const [proofFailed, setProofFailed] = useState(false);
+  // адреса, для которых доказательство уже отправляли: повтор только по кнопке,
+  // иначе ошибка проверки уводит эффект в бесконечный цикл
+  const attempted = useRef<Set<string>>(new Set());
 
   // Запрашиваем nonce заранее: кошелёк должен подписать именно серверный payload.
   useEffect(() => {
@@ -50,7 +53,7 @@ export function SettingsPage() {
   useEffect(() => {
     if (!wallet || proofPending) return;
     const address = wallet.account.address;
-    if (provedFor.current === address) return;
+    if (attempted.current.has(address)) return;
 
     const proof = wallet.connectItems?.tonProof;
     if (!proof || !("proof" in proof)) {
@@ -58,7 +61,8 @@ export function SettingsPage() {
       return;
     }
 
-    provedFor.current = address;
+    attempted.current.add(address);
+    setProofFailed(false);
     setProofPending(true);
     userApi
       .connectWallet({
@@ -76,7 +80,8 @@ export function SettingsPage() {
         toast(t("common.done"), "success");
       })
       .catch((error) => {
-        provedFor.current = null;
+        // отметку не снимаем: иначе эффект пойдёт на новый круг и завалит экран
+        setProofFailed(true);
         toastError(error);
       })
       .finally(() => setProofPending(false));
@@ -110,6 +115,21 @@ export function SettingsPage() {
         <div className="mono" style={{ marginTop: 8 }}>
           {proofPending ? t("common.loading") : (address ?? t("settings.notConnected"))}
         </div>
+
+        {proofFailed ? (
+          <div style={{ marginTop: 10 }}>
+            <div className="field-error">{t("settings.proofFailed")}</div>
+            <Button
+              size="sm"
+              onClick={() => {
+                attempted.current.clear();
+                setProofFailed(false);
+              }}
+            >
+              {t("common.retry")}
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       <div className="card">

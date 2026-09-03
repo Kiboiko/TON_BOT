@@ -32,22 +32,28 @@ def test_fake_service_satisfies_interface():
 async def test_subdom_client_normalizes_transaction():
     """Тело транзакции пробрасывается наверх без изменений, поля — нормализуются."""
 
+    seen: dict[str, str] = {}
+
     async def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["query"] = str(request.url.query.decode())
+        # реальный ответ subdom: объект без обёртки
         return httpx.Response(
             200,
             json={
-                "transaction": {
-                    "validUntil": 1900000000,
-                    "messages": [
-                        {"address": "EQAbc", "amount": "50000000", "payload": "te6ccg"},
-                    ],
-                }
+                "validUntil": 1900000000,
+                "messages": [{"address": "EQAbc", "amount": "50000000", "payload": "te6ccg"}],
             },
         )
 
     transport = httpx.MockTransport(handler)
     client = SubdomHttpClient(client=httpx.AsyncClient(transport=transport, base_url="http://x"))
     tx = await client.deploy_proxy_zone("EQDns", "mysite", "EQWallet", "ton")
+
+    # путь и имена параметров — как в схеме сервиса
+    assert seen["path"] == "/api/v1/deploy-proxy-zone"
+    assert "dns_item_address=EQDns" in seen["query"]
+    assert "user_wallet_address=EQWallet" in seen["query"]
 
     assert tx.valid_until == 1900000000
     assert tx.to_tonconnect() == {
@@ -186,4 +192,118 @@ async def test_ton_proof_signature_roundtrip():
     # неизвестный кошелёк (публичный ключ недоступен)
     assert not await verify_ton_proof(
         "0:" + "44" * 32, ts, domain, signature, payload, allowed_domain=domain, client=client
+    )
+
+
+def test_boc_is_not_mistaken_for_tx_hash():
+    """TON Connect возвращает BOC, а не хэш: по нему в блокчейн ходить нельзя."""
+    from app.services.ton import looks_like_tx_hash
+
+    assert looks_like_tx_hash("a" * 64)
+    assert looks_like_tx_hash("hR1n8/1XCJ8mFo2xzKQ5eTLRPaOBBk1J5xQZLBGm0Uo=")
+    assert not looks_like_tx_hash("te6cckEBAQEAAgAAAA==")  # короткий BOC
+    assert not looks_like_tx_hash("te6cckEBAgEA" + "A" * 400)  # длинный BOC
+    assert not looks_like_tx_hash("")
+    assert not looks_like_tx_hash(None)
+
+
+async def test_lookup_by_boc_does_not_break_verification():
+    """422 от TON API на непохожую на хэш строку не должен ронять проверку платежа."""
+    import httpx as _httpx
+    from decimal import Decimal as _D
+    from app.services.ton import ToncenterClient, verify_payment
+
+    async def handler(request):
+        return _httpx.Response(422, json={"error": "invalid hash"})
+
+    client = ToncenterClient(
+        client=_httpx.AsyncClient(transport=_httpx.MockTransport(handler), base_url="http://x")
+    )
+    treasury = "0:" + "11" * 32
+    result = await verify_payment(
+        tx_hash="te6cckEBAQEAAgAAAA==" + "A" * 300,
+        destination=treasury,
+        min_amount=_D("1"),
+        comment="tsb-none",
+        client=client,
+    )
+    assert result.ok is False
+    assert "not found" in (result.reason or "")
+
+
+async def test_ton_api_outage_is_retryable_not_fatal():
+    """Сбой TON API — «пока не подтверждено», а не 502: фронт продолжит опрашивать."""
+    import httpx as _httpx
+    from decimal import Decimal as _D
+    from app.services.ton import ToncenterClient, verify_payment
+
+    async def handler(request):
+        return _httpx.Response(500, json={"error": "upstream is down"})
+
+    client = ToncenterClient(
+        client=_httpx.AsyncClient(transport=_httpx.MockTransport(handler), base_url="http://x")
+    )
+    result = await verify_payment(
+        tx_hash="a" * 64,
+        destination="0:" + "11" * 32,
+        min_amount=_D("1"),
+        comment="tsb-none",
+        client=client,
+    )
+    assert result.ok is False
+    assert "yet" in (result.reason or "")
+
+
+def _wallet_state_init(public_key: bytes, v5: bool) -> str:
+    """Собирает state_init кошелька: code + data в раскладке v3/v4 или W5."""
+    from pytoniq_core import begin_cell
+
+    code = begin_cell().store_uint(0xDEAD, 16).end_cell()  # содержимое кода не важно
+    data = begin_cell()
+    if v5:
+        data = data.store_bit_int(1)  # is_signature_allowed у W5
+    data = data.store_uint(0, 32).store_uint(698983191, 32).store_bytes(public_key)
+    state_init = (
+        begin_cell()
+        .store_uint(0, 2)          # split_depth, special — оба отсутствуют
+        .store_bit_int(1)          # есть code
+        .store_bit_int(1)          # есть data
+        .store_bit_int(0)          # library отсутствует
+        .store_ref(code)
+        .store_ref(data.end_cell())
+        .end_cell()
+    )
+    return base64.b64encode(state_init.to_boc()).decode(), state_init.hash.hex()
+
+
+@pytest.mark.parametrize("v5", [False, True], ids=["кошелёк v4", "кошелёк W5"])
+async def test_ton_proof_works_for_undeployed_wallet(v5: bool):
+    """Незадеплоенный кошелёк: ключ берётся из state_init, обе раскладки данных."""
+    from app.services.ton import pubkeys_from_state_init
+
+    key = SigningKey.generate()
+    state_init, addr_hash = _wallet_state_init(bytes(key.verify_key), v5)
+    address = f"0:{addr_hash}"
+    domain, payload, ts = "test.local", "nonce-xyz", int(time.time())
+
+    assert bytes(key.verify_key) in pubkeys_from_state_init(state_init, address)
+
+    signature = base64.b64encode(
+        key.sign(build_ton_proof_message(address, domain, ts, payload)).signature
+    ).decode()
+
+    client = MockTonClient()  # в сети кошелька нет — get_public_key вернёт None
+    assert await verify_ton_proof(
+        address, ts, domain, signature, payload,
+        state_init=state_init, allowed_domain=domain, client=client,
+    )
+
+    # чужая подпись не проходит даже с валидным state_init
+    other = SigningKey.generate()
+    bad = base64.b64encode(
+        other.sign(build_ton_proof_message(address, domain, ts, payload)).signature
+    ).decode()
+    assert not await verify_ton_proof(
+        address, ts, domain, bad, payload,
+        state_init=state_init, allowed_domain=domain, client=client,
     )

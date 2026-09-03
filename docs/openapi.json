@@ -1028,6 +1028,7 @@
           "domains"
         ],
         "summary": "Check Domain",
+        "description": "Свободно ли имя в зоне платформы. Проверяется резолвом в блокчейне.",
         "operationId": "check_domain_api_domains_check_get",
         "parameters": [
           {
@@ -1039,17 +1040,6 @@
               "minLength": 1,
               "maxLength": 126,
               "title": "Name"
-            }
-          },
-          {
-            "name": "tld",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 32,
-              "default": "ton",
-              "title": "Tld"
             }
           },
           {
@@ -1093,14 +1083,14 @@
         }
       }
     },
-    "/api/domains/deploy-zone": {
+    "/api/domains/claim": {
       "post": {
         "tags": [
           "domains"
         ],
-        "summary": "Deploy Zone",
-        "description": "Готовит транзакцию деплоя зоны — подписывает её кошелёк пользователя.",
-        "operationId": "deploy_zone_api_domains_deploy_zone_post",
+        "summary": "Claim Domain",
+        "description": "Транзакция на получение субдомена — подписывает кошелёк пользователя.",
+        "operationId": "claim_domain_api_domains_claim_post",
         "parameters": [
           {
             "name": "X-Telegram-Init-Data",
@@ -1124,7 +1114,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DeployZoneRequest"
+                "$ref": "#/components/schemas/DomainClaimRequest"
               }
             }
           }
@@ -1135,7 +1125,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DeployZoneResponse"
+                  "$ref": "#/components/schemas/DomainClaimResponse"
                 }
               }
             }
@@ -1159,7 +1149,7 @@
           "domains"
         ],
         "summary": "Confirm Domain",
-        "description": "Фронт сообщает, что транзакция отправлена; проверяем состояние домена в сети.\n\nФронту на слово не верим: домен считается привязанным только если доменный\nсервис подтверждает, что он больше не свободен и принадлежит кошельку.",
+        "description": "Фронт сообщает, что транзакция отправлена; проверяем состояние в сети.\n\nФронту на слово не верим: субдомен считается полученным, только если резолвер\nвидит его в блокчейне и владелец — кошелёк пользователя.",
         "operationId": "confirm_domain_api_domains_confirm_post",
         "parameters": [
           {
@@ -2009,6 +1999,164 @@
         }
       }
     },
+    "/api/admin/zone": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Zone Config",
+        "description": "Настройки зоны субдоменов платформы.",
+        "operationId": "zone_config_api_admin_zone_get",
+        "parameters": [
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZoneOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update Zone",
+        "description": "Правка настроек зоны: домен, его DNS-item и адрес коллекции после разворота.",
+        "operationId": "update_zone_api_admin_zone_patch",
+        "parameters": [
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ZoneUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZoneOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/zone/deploy": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Deploy Zone",
+        "description": "Транзакция разворота зоны субдоменов на домене платформы.\n\nОперация разовая и подписывается кошельком владельца домена — то есть\nадминистратором. После неё в сети появляется коллекция, адрес которой\nнужно вписать в настройки зоны.",
+        "operationId": "deploy_zone_api_admin_zone_deploy_post",
+        "parameters": [
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZoneDeployResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/stats": {
       "get": {
         "tags": [
@@ -2041,6 +2189,65 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AdminStatsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/uploads": {
+      "post": {
+        "tags": [
+          "uploads"
+        ],
+        "summary": "Upload Image",
+        "operationId": "upload_image_api_uploads_post",
+        "parameters": [
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_image_api_uploads_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadResponse"
                 }
               }
             }
@@ -2348,6 +2555,20 @@
         ],
         "title": "AuthResponse"
       },
+      "Body_upload_image_api_uploads_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_image_api_uploads_post"
+      },
       "ConfirmPaymentRequest": {
         "properties": {
           "payment_id": {
@@ -2357,7 +2578,7 @@
           },
           "tx_hash": {
             "type": "string",
-            "maxLength": 128,
+            "maxLength": 8192,
             "minLength": 8,
             "title": "Tx Hash"
           }
@@ -2438,65 +2659,6 @@
         "type": "object",
         "title": "CustomCodeRequest"
       },
-      "DeployZoneRequest": {
-        "properties": {
-          "site_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Site Id"
-          },
-          "domain": {
-            "type": "string",
-            "maxLength": 126,
-            "minLength": 1,
-            "title": "Domain"
-          },
-          "tld": {
-            "type": "string",
-            "title": "Tld",
-            "default": "ton"
-          },
-          "mode": {
-            "type": "string",
-            "enum": [
-              "proxy",
-              "sbt"
-            ],
-            "title": "Mode",
-            "default": "proxy"
-          }
-        },
-        "type": "object",
-        "required": [
-          "site_id",
-          "domain"
-        ],
-        "title": "DeployZoneRequest"
-      },
-      "DeployZoneResponse": {
-        "properties": {
-          "transaction": {
-            "$ref": "#/components/schemas/TonConnectTransaction"
-          },
-          "payment_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Payment Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "transaction"
-        ],
-        "title": "DeployZoneResponse"
-      },
       "DnsBindResponse": {
         "properties": {
           "transaction": {
@@ -2523,18 +2685,11 @@
             "type": "string",
             "title": "Domain"
           },
-          "dns_item_address": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dns Item Address"
+          "zone": {
+            "type": "string",
+            "title": "Zone"
           },
-          "collection_address": {
+          "item_address": {
             "anyOf": [
               {
                 "type": "string"
@@ -2543,7 +2698,7 @@
                 "type": "null"
               }
             ],
-            "title": "Collection Address"
+            "title": "Item Address"
           },
           "owner": {
             "anyOf": [
@@ -2561,9 +2716,48 @@
         "required": [
           "available",
           "status",
-          "domain"
+          "domain",
+          "zone"
         ],
         "title": "DomainCheckResponse"
+      },
+      "DomainClaimRequest": {
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Site Id"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 126,
+            "minLength": 3,
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "site_id",
+          "name"
+        ],
+        "title": "DomainClaimRequest"
+      },
+      "DomainClaimResponse": {
+        "properties": {
+          "transaction": {
+            "$ref": "#/components/schemas/TonConnectTransaction"
+          },
+          "domain": {
+            "type": "string",
+            "title": "Domain"
+          }
+        },
+        "type": "object",
+        "required": [
+          "transaction",
+          "domain"
+        ],
+        "title": "DomainClaimResponse"
       },
       "DomainConfirmRequest": {
         "properties": {
@@ -2574,7 +2768,7 @@
           },
           "tx_hash": {
             "type": "string",
-            "maxLength": 128,
+            "maxLength": 8192,
             "minLength": 8,
             "title": "Tx Hash"
           }
@@ -2591,6 +2785,17 @@
           "status": {
             "type": "string",
             "title": "Status"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
           }
         },
         "type": "object",
@@ -2848,6 +3053,17 @@
               }
             ],
             "title": "Error"
+          },
+          "public_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Url"
           }
         },
         "type": "object",
@@ -3683,6 +3899,29 @@
         ],
         "title": "TonProofPayloadResponse"
       },
+      "UploadResponse": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "mime": {
+            "type": "string",
+            "title": "Mime"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "size",
+          "mime"
+        ],
+        "title": "UploadResponse"
+      },
       "UserOut": {
         "properties": {
           "id": {
@@ -3812,6 +4051,119 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "ZoneDeployResponse": {
+        "properties": {
+          "transaction": {
+            "$ref": "#/components/schemas/TonConnectTransaction"
+          },
+          "domain": {
+            "type": "string",
+            "title": "Domain"
+          }
+        },
+        "type": "object",
+        "required": [
+          "transaction",
+          "domain"
+        ],
+        "title": "ZoneDeployResponse"
+      },
+      "ZoneOut": {
+        "properties": {
+          "domain": {
+            "type": "string",
+            "title": "Domain"
+          },
+          "dns_item_address": {
+            "type": "string",
+            "title": "Dns Item Address"
+          },
+          "collection_address": {
+            "type": "string",
+            "title": "Collection Address"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "proxy",
+              "sbt"
+            ],
+            "title": "Mode"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "deployable": {
+            "type": "boolean",
+            "title": "Deployable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "domain",
+          "dns_item_address",
+          "collection_address",
+          "mode",
+          "configured",
+          "deployable"
+        ],
+        "title": "ZoneOut"
+      },
+      "ZoneUpdateRequest": {
+        "properties": {
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          },
+          "dns_item_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dns Item Address"
+          },
+          "collection_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Address"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "proxy",
+                  "sbt"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          }
+        },
+        "type": "object",
+        "title": "ZoneUpdateRequest"
       }
     }
   }

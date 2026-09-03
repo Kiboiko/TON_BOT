@@ -128,11 +128,20 @@ export interface TonConnectTransaction {
 
 export interface DomainCheck {
   available: boolean;
-  status: string;
-  domain: string;
-  dns_item_address: string | null;
-  collection_address: string | null;
+  status: string; // free / taken / unknown
+  domain: string; // полный адрес: имя.зона.ton
+  zone: string;
+  item_address: string | null;
   owner: string | null;
+}
+
+export interface Zone {
+  domain: string;
+  dns_item_address: string;
+  collection_address: string;
+  mode: "proxy" | "sbt";
+  configured: boolean;
+  deployable: boolean;
 }
 
 export interface Tariff {
@@ -174,6 +183,8 @@ export interface PublishStatus {
   storage_bag_id: string | null;
   published_at: string | null;
   error: string | null;
+  /** http-ссылка на опубликованный сайт — работает и до привязки домена .ton */
+  public_url: string | null;
 }
 
 export interface AdminUserListItem {

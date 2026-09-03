@@ -17,6 +17,17 @@ import "./styles/index.css";
 const MANIFEST_URL =
   import.meta.env.VITE_TONCONNECT_MANIFEST ?? `${window.location.origin}/tonconnect-manifest.json`;
 
+/**
+ * Куда кошелёк возвращает пользователя после подписи.
+ *
+ * Внутри Telegram это обязательный параметр: без него кошелёк не знает, как
+ * вернуть управление в Mini App, и подтверждение зависает на бесконечной
+ * загрузке. Значение — ссылка на бота, из которого открыто приложение.
+ */
+const TWA_RETURN_URL = import.meta.env.VITE_TWA_RETURN_URL as
+  | `${string}://${string}`
+  | undefined;
+
 async function backendAvailable(): Promise<boolean> {
   try {
     const base = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
@@ -48,7 +59,10 @@ async function bootstrap(): Promise<void> {
 
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <TonConnectUIProvider manifestUrl={MANIFEST_URL}>
+      <TonConnectUIProvider
+        manifestUrl={MANIFEST_URL}
+        actionsConfiguration={TWA_RETURN_URL ? { twaReturnUrl: TWA_RETURN_URL } : undefined}
+      >
         <BrowserRouter>
           <App />
         </BrowserRouter>

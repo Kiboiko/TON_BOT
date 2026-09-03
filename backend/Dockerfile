@@ -1,3 +1,7 @@
+# storage-daemon-cli берём из официального образа TON: у демона нет HTTP API,
+# и backend управляет им через эту утилиту по управляющему порту.
+FROM ghcr.io/ton-blockchain/ton:latest AS ton
+
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -13,9 +17,13 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY --from=ton /usr/local/bin/storage-daemon-cli /usr/local/bin/storage-daemon-cli
+
 COPY . .
 
-RUN useradd -m appuser && mkdir -p /data/sites && chown -R appuser /app /data
+# каталоги создаём до монтирования томов: Docker наследует владельца
+# из образа, иначе новый том достаётся root, а сервис работает не под ним
+RUN useradd -m appuser && mkdir -p /data/sites /data/uploads && chown -R appuser /app /data
 USER appuser
 
 EXPOSE 8000

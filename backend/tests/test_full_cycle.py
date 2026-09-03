@@ -56,7 +56,7 @@ def paid_tx(comment: str, amount: str, tx_hash: str = "abc123hash") -> TxInfo:
     )
 
 
-async def test_full_cycle(client, ton, queue, notifier, domain_service):
+async def test_full_cycle(client, ton, queue, notifier, domain_service, resolver):
     h = headers_for(2001, "founder")
     tariff_id = await make_tariff()
 
@@ -109,47 +109,81 @@ async def test_full_cycle(client, ton, queue, notifier, domain_service):
 
     site_id = site_ids[0]
 
-    # 6. домен: проверка, деплой зоны, подтверждение
-    check = await client.get("/api/domains/check", headers=h, params={"name": "mysite", "tld": "ton"})
-    assert check.json()["available"] is True
+    # 6. субдомен в зоне платформы: настройка зоны, проверка, получение, подтверждение
+    admin_h = headers_for(777000, "zone_admin")
+    zone = await client.patch(
+        "/api/admin/zone",
+        headers=admin_h,
+        json={
+            "domain": "tonsite.ton",
+            "dns_item_address": "0:" + "aa" * 32,
+            "collection_address": "0:" + "bb" * 32,
+            "mode": "proxy",
+        },
+    )
+    assert zone.status_code == 200 and zone.json()["configured"] is True
 
-    # без подключённого кошелька деплой невозможен
+    check = await client.get("/api/domains/check", headers=h, params={"name": "mysite"})
+    assert check.json()["available"] is True
+    assert check.json()["domain"] == "mysite.tonsite.ton"
+
+    taken = await client.get("/api/domains/check", headers=h, params={"name": "takenname"})
+    assert taken.json()["available"] is False
+
+    # без подключённого кошелька субдомен не получить
     no_wallet = await client.post(
-        "/api/domains/deploy-zone",
-        headers=h,
-        json={"site_id": site_id, "domain": "mysite", "tld": "ton", "mode": "proxy"},
+        "/api/domains/claim", headers=h, json={"site_id": site_id, "name": "mysite"}
     )
     assert no_wallet.status_code == 401
     assert no_wallet.json()["error"]["code"] == "WALLET_NOT_CONNECTED"
 
+    wallet = "0:" + "1" * 64
     async with SessionLocal() as session:  # кошелёк привязывается через ton_proof, здесь — напрямую
         from app.models import User
 
         user = await session.scalar(select(User).where(User.telegram_id == 2001))
-        user.wallet_address = "0:" + "1" * 64
+        user.wallet_address = wallet
         await session.commit()
 
-    deploy = await client.post(
-        "/api/domains/deploy-zone",
-        headers=h,
-        json={"site_id": site_id, "domain": "mysite", "tld": "ton", "mode": "proxy"},
+    claim = await client.post(
+        "/api/domains/claim", headers=h, json={"site_id": site_id, "name": "mysite"}
     )
-    assert deploy.status_code == 200
-    assert deploy.json()["transaction"]["messages"]
-    assert ("deploy_proxy_zone", {"domain": "mysite", "wallet": "0:" + "1" * 64}) in domain_service.calls
+    assert claim.status_code == 200, claim.text
+    assert claim.json()["domain"] == "mysite.tonsite.ton"
+    assert claim.json()["transaction"]["messages"]
+    assert ("start_auction", {"subdomain": "mysite"}) in domain_service.calls
 
-    # 7. публикация: задача уходит в очередь
-    publish = await client.post(f"/api/sites/{site_id}/publish", headers=h)
-    assert publish.status_code == 200
-    assert publish.json()["status"] == "publishing"
+    # пока субдомена нет в сети — подтверждение отвечает pending
+    pending = await client.post(
+        "/api/domains/confirm", headers=h, json={"site_id": site_id, "tx_hash": "boc-not-onchain"}
+    )
+    assert pending.json()["status"] == "pending"
 
+    # субдомен появился и принадлежит кошельку пользователя
+    resolver.own("mysite.tonsite.ton", wallet, item_address="0:" + "cc" * 32)
+    confirmed = await client.post(
+        "/api/domains/confirm", headers=h, json={"site_id": site_id, "tx_hash": "boc-onchain"}
+    )
+    assert confirmed.json()["status"] == "publishing"
+
+    # 7. публикация уже запущена подтверждением домена
     status = await client.get(f"/api/sites/{site_id}/publish-status", headers=h)
     assert status.json()["status"] == "publishing"
 
-    # 8. воркер выполняет задачу
-    job = await queue.dequeue(timeout=1)
-    assert job is not None and job.name == "publish_site"
-    await run_publish_job(job.payload["site_id"])
+    # повторный запуск, пока идёт публикация, отклоняется
+    again = await client.post(f"/api/sites/{site_id}/publish", headers=h)
+    assert again.status_code == 409
+    assert again.json()["error"]["code"] == "PUBLISH_IN_PROGRESS"
+
+    # а сайт без домена публикуется обычным путём
+    other = await client.post(f"/api/sites/{site_ids[1]}/publish", headers=h)
+    assert other.status_code == 200 and other.json()["status"] == "publishing"
+
+    # 8. воркер выполняет задачи из очереди
+    for _ in range(2):
+        job = await queue.dequeue(timeout=1)
+        assert job is not None and job.name == "publish_site"
+        await run_publish_job(job.payload["site_id"])
 
     status = await client.get(f"/api/sites/{site_id}/publish-status", headers=h)
     body = status.json()
@@ -297,3 +331,35 @@ async def test_publish_status_survives_restart(client, queue):
         site = await session.get(Site, uuid.UUID(site_id))
         assert site.status == SiteStatus.publishing
         assert site.publish_job_id
+
+
+async def test_published_site_is_served_publicly(client, queue, storage):
+    """Опубликованный сайт открывается обычной ссылкой, черновик — нет."""
+    h = headers_for(2008)
+    created = await client.post(
+        "/api/sites", headers=h, json={"type": "visitka", "title": "Публичный"}
+    )
+    site_id = created.json()["site"]["id"]
+
+    # черновик наружу не отдаётся
+    assert (await client.get(f"/s/{site_id}")).status_code == 404
+
+    await client.patch(
+        f"/api/sites/{site_id}",
+        headers=h,
+        json={"content_json": {"version": 1, "meta": {"title": "Публичный"}, "theme":
+              {"preset": "light", "accent": "#0098ea"}, "blocks": [
+                  {"id": "1", "type": "hero", "props": {"title": "Привет из TON"}}]}},
+    )
+    await client.post(f"/api/sites/{site_id}/publish", headers=h)
+    job = await queue.dequeue(timeout=1)
+    await run_publish_job(job.payload["site_id"])
+
+    status = await client.get(f"/api/sites/{site_id}/publish-status", headers=h)
+    assert status.json()["status"] == "published"
+    assert status.json()["public_url"].endswith(f"/s/{site_id}")
+
+    page = await client.get(f"/s/{site_id}")
+    assert page.status_code == 200
+    assert "Привет из TON" in page.text
+    assert page.headers["content-type"].startswith("text/html")

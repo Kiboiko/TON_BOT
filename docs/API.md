@@ -78,16 +78,31 @@ payload → передаёт его в TON Connect как `tonProof` → при�
 Публикация асинхронная: после `publish` опрашивайте `publish-status`, пока
 статус не станет `published` или `publish_error` (интервал ~2–3 с).
 
-### Домены
+### Домены (субдомены в зоне платформы)
+
+Модель subdom: платформа владеет одним доменом `.ton` и один раз разворачивает
+на нём зону субдоменов; пользователи получают адреса `имя.домен.ton` внутри неё.
+Разворот зоны — операция администратора, см. раздел админки.
 
 | Метод | Путь | Ответ |
 |---|---|---|
-| GET | `/api/domains/check?name=&tld=` | `{ available, status, domain, dns_item_address?, collection_address?, owner? }` |
-| POST | `/api/domains/deploy-zone` | `{ transaction }` |
-| POST | `/api/domains/confirm` | `{ status: "publishing" \| "pending" }` |
+| GET | `/api/domains/check?name=` | `{ available, status, domain, zone, item_address?, owner? }` |
+| POST | `/api/domains/claim` | `{ transaction, domain }` |
+| POST | `/api/domains/confirm` | `{ status: "publishing" \| "pending", domain }` |
 
-`confirm` возвращает `pending`, если транзакция ещё не отражена в сети — это не
-ошибка, повторите запрос через несколько секунд.
+Занятость имени проверяется резолвом в блокчейне — у subdom такого эндпоинта нет.
+`confirm` возвращает `pending`, если субдомен ещё не виден в сети: это не ошибка,
+повторите запрос через несколько секунд.
+
+### Загрузка изображений
+
+| Метод | Путь | Ответ |
+|---|---|---|
+| POST | `/api/uploads` (multipart, поле `file`) | `{ url, size, mime }` |
+
+Принимаются PNG, JPEG, GIF и WEBP до 5 МБ. Тип определяется по сигнатуре файла,
+а не по заголовку; SVG не принимается — внутри него исполняется скрипт.
+Загруженные файлы отдаются по `/u/{имя}` без авторизации.
 
 ### Тарифы и подписки
 
@@ -122,6 +137,9 @@ payload → передаёт его в TON Connect как `tonProof` → при�
 | PATCH | `/api/admin/tariffs/{id}` | `{ tariff }` |
 | DELETE | `/api/admin/tariffs/{id}` | `{ success }` |
 | GET | `/api/admin/domains` | `[ { domain, status, site_id, site_title, user_id, telegram_id } ]` |
+| GET | `/api/admin/zone` | `{ domain, dns_item_address, collection_address, mode, configured, deployable }` |
+| PATCH | `/api/admin/zone` | `{ ...zone }` — настройка домена платформы и адреса коллекции |
+| POST | `/api/admin/zone/deploy` | `{ transaction, domain }` — разовый разворот зоны, подписывает владелец домена |
 | GET | `/api/admin/stats` | `{ total_users, total_sites, published_sites, active_subscriptions, revenue, revenue_last_30d, payments_confirmed }` |
 | GET | `/api/admin/actions` | журнал действий админов (аудит) |
 
@@ -133,7 +151,7 @@ payload → передаёт его в TON Connect как `tonProof` → при�
 
 ## Отличия от текста ТЗ
 
-Контракт реализован целиком; добавлено три эндпоинта, без которых схема была бы
+Контракт реализован целиком; добавлены эндпоинты, без которых схема была бы
 небезопасной или незавершённой:
 
 1. `GET /api/user/ton-proof-payload` — одноразовый nonce для ton_proof.
@@ -141,5 +159,14 @@ payload → передаёт его в TON Connect как `tonProof` → при�
    (в ТЗ описана покупка и загрузка, но не шаг подтверждения).
 3. `POST /api/sites/{id}/dns-bind` — транзакция привязки опубликованного контента
    к домену (её подписывает владелец домена, backend лишь собирает тело).
+4. `POST /api/uploads` и `GET /u/{имя}` — загрузка изображений из ТЗ (пункт B2)
+   не имела эндпоинта в разделе 4.
+5. `GET /s/{site_id}` — опубликованный сайт по обычной ссылке: домен `.ton`
+   открывается только TON-браузером, а увидеть результат нужно сразу.
+6. `/api/admin/zone*` — настройка и разворот зоны субдоменов.
 
-Существующие эндпоинты не меняли: пути, поля и статусы совпадают с разделом 4.
+**Изменён по сравнению с ТЗ доменный флоу.** В разделе 4 предполагалось, что
+пользователь разворачивает зону на своём домене (`POST /api/domains/deploy-zone`).
+Реальный subdom API устроен иначе: зона разворачивается один раз на домене
+платформы, а пользователи минтят субдомены внутри неё. Поэтому `deploy-zone`
+переехал в админку, а пользовательский путь стал `check` → `claim` → `confirm`.

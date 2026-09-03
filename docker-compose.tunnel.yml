@@ -1,0 +1,16 @@
+# Оверлей для запуска за туннелем: nginx отдаёт приложение по http на 80,
+# TLS обеспечивает туннель. Запуск:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d
+#   cloudflared tunnel --url http://localhost:80
+#
+# Полученный https-адрес пропишите в BotFather, backend/.env
+# (MINI_APP_URL, TONCONNECT_DOMAIN, CORS_ORIGINS) и в tonconnect-manifest.json.
+
+services:
+  nginx:
+    volumes:
+      - ./nginx/nginx.tunnel.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./frontend/dist:/var/www/miniapp:ro
+    ports:
+      - "80:80"

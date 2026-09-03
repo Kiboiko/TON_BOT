@@ -1,5 +1,5 @@
 /** Обёртки над эндпоинтами раздела 4 ТЗ — ровно те пути, что реализует backend. */
-import { api } from "./client";
+import { api, uploadFile } from "./client";
 import type {
   AdminDomainItem,
   AdminStats,
@@ -21,6 +21,7 @@ import type {
   Theme,
   TonConnectTransaction,
   User,
+  Zone,
 } from "./types";
 
 // --- пользователь и кошелёк ---
@@ -67,13 +68,18 @@ export const sitesApi = {
     api.post<{ success: boolean }>(`/sites/${id}/custom-code`, body),
 };
 
+// --- загрузка картинок ---
+export const uploadsApi = {
+  image: (file: File) => uploadFile<{ url: string; size: number; mime: string }>("/uploads", file),
+};
+
 // --- домены ---
 export const domainsApi = {
-  check: (name: string, tld = "ton") => api.get<DomainCheck>("/domains/check", { name, tld }),
-  deployZone: (body: { site_id: string; domain: string; tld: string; mode: "proxy" | "sbt" }) =>
-    api.post<{ transaction: TonConnectTransaction }>("/domains/deploy-zone", body),
+  check: (name: string) => api.get<DomainCheck>("/domains/check", { name }),
+  claim: (body: { site_id: string; name: string }) =>
+    api.post<{ transaction: TonConnectTransaction; domain: string }>("/domains/claim", body),
   confirm: (body: { site_id: string; tx_hash: string }) =>
-    api.post<{ status: string }>("/domains/confirm", body),
+    api.post<{ status: string; domain: string | null }>("/domains/confirm", body),
 };
 
 // --- тарифы и подписки ---
@@ -122,5 +128,11 @@ export const adminApi = {
   deleteTariff: (id: string) => api.delete<{ success: boolean }>(`/admin/tariffs/${id}`),
 
   domains: () => api.get<AdminDomainItem[]>("/admin/domains"),
+
+  zone: () => api.get<Zone>("/admin/zone"),
+  updateZone: (body: Partial<Omit<Zone, "configured" | "deployable">>) =>
+    api.patch<Zone>("/admin/zone", body),
+  deployZone: () =>
+    api.post<{ transaction: TonConnectTransaction; domain: string }>("/admin/zone/deploy"),
   stats: () => api.get<AdminStats>("/admin/stats"),
 };

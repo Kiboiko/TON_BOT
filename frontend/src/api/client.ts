@@ -119,6 +119,42 @@ async function request<T>(method: Method, path: string, options: RequestOptions 
   return payload as T;
 }
 
+/** Загрузка файла: multipart, поэтому мимо JSON-обёртки. */
+export async function uploadFile<T>(path: string, file: File): Promise<T> {
+  if (mockHandler) {
+    // в демо-режиме сервера нет — отдаём картинку как data-URL
+    const url = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("read failed"));
+      reader.readAsDataURL(file);
+    });
+    return { url, size: file.size, mime: file.type } as T;
+  }
+
+  const form = new FormData();
+  form.append("file", file);
+
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(path), {
+      method: "POST",
+      headers: { "X-Telegram-Init-Data": getInitData() },
+      body: form,
+    });
+  } catch {
+    throw new ApiError(0, { code: "NETWORK_ERROR", message: "Не удалось связаться с сервером" });
+  }
+
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    const error = (payload as { error?: ApiErrorBody } | null)?.error;
+    throw new ApiError(response.status, error ?? { code: "UNKNOWN_ERROR", message: "Ошибка" });
+  }
+  return payload as T;
+}
+
 export const api = {
   get: <T>(path: string, query?: RequestOptions["query"], signal?: AbortSignal) =>
     request<T>("GET", path, { query, signal }),

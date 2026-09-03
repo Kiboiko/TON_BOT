@@ -2,19 +2,29 @@
 
 Архитектурное требование ТЗ (раздел 8): вся работа с `subdom.zone` живёт здесь.
 Наружу торчит только чистый интерфейс `DomainService` в наших собственных типах
-(`TransactionResponse`, `DomainInfo`). Ни один вызывающий модуль не знает ни про
-URL-ы subdom, ни про формат его JSON, ни про его коды ошибок — поэтому замена
-сервиса на альтернативу правит только этот файл.
+(`TransactionResponse`), поэтому замена сервиса правит один этот файл.
 
-Единственное, что пробрасывается «как есть» — тело транзакции TON Connect
-(validUntil + messages): его подписывает кошелёк пользователя, и любое наше
-вмешательство в него сломало бы подпись.
+Реальная схема сервиса (сверено с https://api.subdom.zone/openapi.json):
+
+    POST /api/v1/deploy-proxy-zone   ?dns_item_address&dns_item_name&user_wallet_address&tld
+    POST /api/v1/deploy-sbt-zone     ?dns_item_address&domain&user_wallet_address&tld
+    POST /api/v1/start-auction       ?collection_address&subdomain_name
+    POST /api/v1/mint-sbt-subdomain  ?collection_address&subdomain_name
+    POST /api/v1/claim_subdomain     ?subdomain_item_address
+
+Параметры передаются в query, а не телом. Проверки занятости имени у сервиса нет —
+она делается резолвом домена в блокчейне, см. `app/services/dns_resolver.py`.
+
+Модель работы: владелец домена `.ton` один раз разворачивает на нём зону
+субдоменов, после чего пользователи получают адреса вида `имя.домен.ton` внутри
+этой коллекции. Тело транзакции (validUntil + messages) пробрасывается наверх
+без изменений: его подписывает кошелёк, и любое вмешательство сломало бы подпись.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
 
 import httpx
@@ -27,7 +37,6 @@ log = logging.getLogger(__name__)
 ZoneMode = Literal["proxy", "sbt"]
 
 
-# --------------------------------------------------------------------- наши типы
 @dataclass(slots=True)
 class TransactionMessage:
     address: str
@@ -62,22 +71,9 @@ class TransactionResponse:
         return out
 
 
-@dataclass(slots=True)
-class DomainInfo:
-    domain: str
-    available: bool
-    status: str
-    dns_item_address: str | None = None
-    collection_address: str | None = None
-    owner: str | None = None
-    extra: dict[str, Any] = field(default_factory=dict)
-
-
 @runtime_checkable
 class DomainService(Protocol):
     """Интерфейс доменного сервиса. Меняется сервис — меняется только реализация."""
-
-    async def check_domain(self, name: str, tld: str = "ton") -> DomainInfo: ...
 
     async def deploy_proxy_zone(
         self, dns_item_address: str, dns_item_name: str, user_wallet: str, tld: str = "ton"
@@ -100,7 +96,6 @@ class DomainService(Protocol):
     async def close(self) -> None: ...
 
 
-# --------------------------------------------------------------------- HTTP-реализация
 class SubdomHttpClient:
     """Реализация поверх HTTP API subdom.zone: ретраи, таймауты, маппинг ошибок."""
 
@@ -127,39 +122,37 @@ class SubdomHttpClient:
                     if self._api_key:
                         headers["Authorization"] = f"Bearer {self._api_key}"
                     self._client = httpx.AsyncClient(
-                        base_url=self._base_url,
-                        timeout=self._timeout,
-                        headers=headers,
+                        base_url=self._base_url, timeout=self._timeout, headers=headers
                     )
         return self._client
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+    async def _post(self, path: str, params: dict[str, Any]) -> TransactionResponse:
         client = await self._get_client()
+        params = {k: v for k, v in params.items() if v is not None}
         last_exc: Exception | None = None
 
         for attempt in range(1, self._retries + 1):
             try:
-                resp = await client.request(method, path, **kwargs)
+                resp = await client.post(path, params=params)
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 last_exc = exc
-                log.warning("subdom %s %s network error (try %s): %s", method, path, attempt, exc)
+                log.warning("subdom %s network error (try %s): %s", path, attempt, exc)
             else:
                 # 5xx и 429 — временные, ретраим; 4xx — ошибка запроса, отдаём сразу
                 if resp.status_code >= 500 or resp.status_code == 429:
                     last_exc = SubdomError(
-                        f"subdom responded {resp.status_code}",
-                        details={"status": resp.status_code},
+                        f"subdom responded {resp.status_code}", details={"status": resp.status_code}
                     )
-                    log.warning("subdom %s %s -> %s (try %s)", method, path, resp.status_code, attempt)
+                    log.warning("subdom %s -> %s (try %s)", path, resp.status_code, attempt)
                 elif resp.status_code >= 400:
                     raise SubdomError(
                         self._error_message(resp),
                         code="SUBDOM_BAD_REQUEST",
-                        status_code=400 if resp.status_code < 500 else 502,
+                        status_code=400,
                         details={"status": resp.status_code},
                     )
                 else:
-                    return self._parse_json(resp)
+                    return self._to_transaction(self._parse_json(resp))
 
             if attempt < self._retries:
                 await asyncio.sleep(min(2 ** (attempt - 1), 5))
@@ -173,7 +166,7 @@ class SubdomHttpClient:
         except ValueError as exc:
             raise SubdomError("Malformed response from domain service") from exc
         if not isinstance(data, dict):
-            return {"result": data}
+            raise SubdomError("Unexpected response from domain service")
         return data
 
     @staticmethod
@@ -184,21 +177,13 @@ class SubdomHttpClient:
             return f"Domain service error ({resp.status_code})"
         if isinstance(data, dict):
             for key in ("message", "error", "detail", "description"):
-                val = data.get(key)
-                if isinstance(val, str) and val:
-                    return val
+                value = data.get(key)
+                if isinstance(value, str) and value:
+                    return value
         return f"Domain service error ({resp.status_code})"
 
-    # --- нормализация ответов внешнего API в наши типы ---
     @staticmethod
-    def _to_transaction(data: dict[str, Any]) -> TransactionResponse:
-        payload = data
-        for key in ("transaction", "result", "data"):
-            inner = payload.get(key)
-            if isinstance(inner, dict) and ("messages" in inner or "validUntil" in inner):
-                payload = inner
-                break
-
+    def _to_transaction(payload: dict[str, Any]) -> TransactionResponse:
         raw_messages = payload.get("messages")
         if not isinstance(raw_messages, list) or not raw_messages:
             raise SubdomError(
@@ -215,95 +200,66 @@ class SubdomHttpClient:
                 TransactionMessage(
                     address=str(m["address"]),
                     amount=str(m["amount"]),
-                    payload=m.get("payload") or m.get("body"),
-                    state_init=m.get("stateInit") or m.get("state_init"),
+                    payload=m.get("payload"),
+                    state_init=m.get("stateInit"),
                 )
             )
 
-        valid_until = payload.get("validUntil") or payload.get("valid_until")
+        valid_until = payload.get("validUntil")
         if not isinstance(valid_until, int):
             import time
 
             valid_until = int(time.time()) + 600
 
-        return TransactionResponse(
-            valid_until=int(valid_until),
-            messages=messages,
-            network=payload.get("network"),
-        )
+        return TransactionResponse(valid_until=int(valid_until), messages=messages)
 
     # --- публичный интерфейс ---
-    async def check_domain(self, name: str, tld: str = "ton") -> DomainInfo:
-        data = await self._request("GET", "/domains/check", params={"name": name, "tld": tld})
-        result = data.get("result") if isinstance(data.get("result"), dict) else data
-        available = bool(result.get("available", result.get("is_available", False)))
-        return DomainInfo(
-            domain=f"{name}.{tld}",
-            available=available,
-            status=str(result.get("status") or ("free" if available else "taken")),
-            dns_item_address=result.get("dns_item_address") or result.get("dnsItemAddress"),
-            collection_address=result.get("collection_address") or result.get("collectionAddress"),
-            owner=result.get("owner") or result.get("owner_address"),
-            extra={k: v for k, v in result.items() if k not in {"available", "status"}},
-        )
-
     async def deploy_proxy_zone(
         self, dns_item_address: str, dns_item_name: str, user_wallet: str, tld: str = "ton"
     ) -> TransactionResponse:
-        data = await self._request(
-            "POST",
-            "/zones/deploy-proxy",
-            json={
+        return await self._post(
+            "/api/v1/deploy-proxy-zone",
+            {
                 "dns_item_address": dns_item_address,
                 "dns_item_name": dns_item_name,
-                "user_wallet": user_wallet,
+                "user_wallet_address": user_wallet,
                 "tld": tld,
             },
         )
-        return self._to_transaction(data)
 
     async def deploy_sbt_zone(
         self, dns_item_address: str, domain: str, user_wallet: str, tld: str = "ton"
     ) -> TransactionResponse:
-        data = await self._request(
-            "POST",
-            "/zones/deploy-sbt",
-            json={
+        return await self._post(
+            "/api/v1/deploy-sbt-zone",
+            {
                 "dns_item_address": dns_item_address,
                 "domain": domain,
-                "user_wallet": user_wallet,
+                "user_wallet_address": user_wallet,
                 "tld": tld,
             },
         )
-        return self._to_transaction(data)
 
     async def start_auction(
         self, collection_address: str, subdomain_name: str
     ) -> TransactionResponse:
-        data = await self._request(
-            "POST",
-            "/subdomains/auction",
-            json={"collection_address": collection_address, "subdomain_name": subdomain_name},
+        return await self._post(
+            "/api/v1/start-auction",
+            {"collection_address": collection_address, "subdomain_name": subdomain_name},
         )
-        return self._to_transaction(data)
 
     async def mint_sbt_subdomain(
         self, collection_address: str, subdomain_name: str
     ) -> TransactionResponse:
-        data = await self._request(
-            "POST",
-            "/subdomains/mint-sbt",
-            json={"collection_address": collection_address, "subdomain_name": subdomain_name},
+        return await self._post(
+            "/api/v1/mint-sbt-subdomain",
+            {"collection_address": collection_address, "subdomain_name": subdomain_name},
         )
-        return self._to_transaction(data)
 
     async def claim_subdomain(self, subdomain_item_address: str) -> TransactionResponse:
-        data = await self._request(
-            "POST",
-            "/subdomains/claim",
-            json={"subdomain_item_address": subdomain_item_address},
+        return await self._post(
+            "/api/v1/claim_subdomain", {"subdomain_item_address": subdomain_item_address}
         )
-        return self._to_transaction(data)
 
     async def close(self) -> None:
         if self._client is not None:
@@ -311,13 +267,8 @@ class SubdomHttpClient:
             self._client = None
 
 
-# --------------------------------------------------------------------- заглушка
 class FakeDomainService:
-    """Детерминированная заглушка для локальной разработки и тестов.
-
-    Позволяет фронту и интеграционным тестам проходить весь флоу без внешнего
-    сервиса. Домены, начинающиеся на `taken`, считаются занятыми.
-    """
+    """Детерминированная заглушка для локальной разработки и тестов."""
 
     FAKE_ADDRESS = "EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
@@ -330,17 +281,6 @@ class FakeDomainService:
         return TransactionResponse(
             valid_until=int(time.time()) + 600,
             messages=[TransactionMessage(address=self.FAKE_ADDRESS, amount=amount, payload="te6cc")],
-        )
-
-    async def check_domain(self, name: str, tld: str = "ton") -> DomainInfo:
-        self.calls.append(("check_domain", {"name": name, "tld": tld}))
-        available = not name.lower().startswith("taken")
-        return DomainInfo(
-            domain=f"{name}.{tld}",
-            available=available,
-            status="free" if available else "taken",
-            dns_item_address=self.FAKE_ADDRESS,
-            collection_address=self.FAKE_ADDRESS,
         )
 
     async def deploy_proxy_zone(
@@ -359,7 +299,7 @@ class FakeDomainService:
         self, collection_address: str, subdomain_name: str
     ) -> TransactionResponse:
         self.calls.append(("start_auction", {"subdomain": subdomain_name}))
-        return self._tx()
+        return self._tx("2500000000")
 
     async def mint_sbt_subdomain(
         self, collection_address: str, subdomain_name: str

@@ -65,6 +65,16 @@ def normalize_address(address: str) -> str:
         return address.lower()
 
 
+def looks_like_tx_hash(value: str | None) -> bool:
+    """Хэш транзакции — 64 hex-символа или 44 символа base64 (32 байта)."""
+    if not value:
+        return False
+    value = value.strip()
+    if len(value) == 64 and all(c in "0123456789abcdefABCDEF" for c in value):
+        return True
+    return len(value) == 44 and value.endswith("=")
+
+
 def same_address(a: str | None, b: str | None) -> bool:
     if not a or not b:
         return False
@@ -183,9 +193,8 @@ class ToncenterClient:
     async def find_incoming(
         self, address: str, *, comment: str | None = None, since: int | None = None, limit: int = 50
     ) -> list[TxInfo]:
-        result = await self._call(
-            "/getTransactions", {"address": address, "limit": limit, "archival": "true"}
-        )
+        # без archival: ищем свежий платёж, а архивные ноды отстают от сети
+        result = await self._call("/getTransactions", {"address": address, "limit": limit})
         out: list[TxInfo] = []
         for tx in result or []:
             info = self._to_txinfo(tx)
@@ -201,12 +210,23 @@ class ToncenterClient:
     async def get_transaction_by_hash(
         self, tx_hash: str, address: str | None = None
     ) -> TxInfo | None:
-        if not address:
+        """Ищет транзакцию по хэшу. Не найдено или хэш не распознан — None.
+
+        Фронт присылает то, что вернул TON Connect, а это BOC внешнего сообщения,
+        а не хэш транзакции. Для такой строки TON API отвечает 422 — это не сбой
+        сервиса, а «искать нечего», поэтому наверх уходит None, и основной путь
+        поиска (по комментарию-нонсу) отрабатывает как обычно.
+        """
+        if not address or not looks_like_tx_hash(tx_hash):
             return None
-        result = await self._call(
-            "/getTransactions",
-            {"address": address, "limit": 100, "hash": tx_hash, "archival": "true"},
-        )
+        try:
+            result = await self._call(
+                "/getTransactions",
+                {"address": address, "limit": 100, "hash": tx_hash, "archival": "true"},
+            )
+        except TonApiError as exc:
+            log.warning("lookup by hash failed: %s", exc)
+            return None
         for tx in result or []:
             info = self._to_txinfo(tx)
             if info and (not tx_hash or info.tx_hash == tx_hash):
@@ -331,34 +351,50 @@ def build_ton_proof_message(
     return TON_CONNECT_PREFIX + hashlib.sha256(message).digest()
 
 
-def pubkey_from_state_init(state_init_b64: str, address: str) -> bytes | None:
-    """Достаёт публичный ключ из state_init и сверяет его хэш с адресом.
+def pubkeys_from_state_init(state_init_b64: str, address: str) -> list[bytes]:
+    """Кандидаты публичных ключей из state_init кошелька.
 
-    Нужно для кошельков, ещё не задеплоенных в сети: get-метода у них нет.
+    Нужно кошелькам, ещё не задеплоенным в сети: get-метода `get_public_key`
+    у них нет. Раскладка данных зависит от версии кошелька:
+
+        v3 / v4:  seqno:32, wallet_id:32, public_key:256
+        v5 (W5):  is_signature_allowed:1, seqno:32, wallet_id:32, public_key:256
+
+    Определять версию по коду не нужно: возвращаем оба варианта, а какой верен —
+    покажет проверка подписи. Подделать это нельзя, потому что хэш state_init
+    обязан совпадать с адресом кошелька, а он проверяется здесь же.
     """
     try:
         from pytoniq_core import Cell
     except ImportError:  # pragma: no cover - библиотека есть в requirements
-        return None
+        return []
     try:
         cell = Cell.one_from_boc(base64.b64decode(state_init_b64))
     except Exception:  # noqa: BLE001 - любой битый BOC = отказ
-        return None
+        log.warning("ton_proof: state_init не разобрался")
+        return []
 
     _, _, hex_hash = normalize_address(address).partition(":")
     if cell.hash.hex() != hex_hash:
-        return None
+        log.warning("ton_proof: state_init не соответствует адресу кошелька")
+        return []
 
-    for ref in cell.refs:
-        data = ref.begin_parse()
+    # StateInit хранит ссылки в порядке code, data — нужна вторая
+    data_cell = cell.refs[1] if len(cell.refs) >= 2 else (cell.refs[0] if cell.refs else None)
+    if data_cell is None:
+        return []
+
+    keys: list[bytes] = []
+    for offset in (64, 65):  # v3/v4 и v5
         try:
-            # data кошелька v3/v4: seqno:uint32, wallet_id:uint32, public_key:uint256
-            data.load_uint(32)
-            data.load_uint(32)
-            return data.load_bytes(32)
-        except Exception:  # noqa: BLE001
+            slice_ = data_cell.begin_parse()
+            slice_.skip_bits(offset)
+            key = slice_.load_bytes(32)
+        except Exception:  # noqa: BLE001 - не хватило бит: вариант не подходит
             continue
-    return None
+        if key not in keys:
+            keys.append(key)
+    return keys
 
 
 async def verify_ton_proof(
@@ -389,27 +425,39 @@ async def verify_ton_proof(
         return False
 
     client = client or get_ton_client()
-    public_key: bytes | None = None
+
+    # ключ берём из сети, а для незадеплоенного кошелька — из state_init
+    candidates: list[bytes] = []
     try:
-        public_key = await client.get_public_key(address)
+        onchain_key = await client.get_public_key(address)
     except TonApiError as exc:
-        log.warning("ton_proof: cannot fetch public key: %s", exc)
-    if public_key is None and state_init:
-        public_key = pubkey_from_state_init(state_init, address)
-    if public_key is None:
+        log.warning("ton_proof: публичный ключ из сети недоступен: %s", exc)
+        onchain_key = None
+    if onchain_key:
+        candidates.append(onchain_key)
+    if state_init:
+        candidates.extend(k for k in pubkeys_from_state_init(state_init, address) if k not in candidates)
+
+    if not candidates:
+        log.warning("ton_proof: публичный ключ кошелька %s не найден", address[:12])
         return False
 
     try:
         signature = base64.b64decode(signature_b64)
     except (binascii.Error, ValueError):
+        log.warning("ton_proof: подпись не декодируется")
         return False
 
     message = build_ton_proof_message(address, proof_domain, proof_timestamp, payload)
-    try:
-        VerifyKey(public_key).verify(message, signature)
-    except (BadSignatureError, ValueError):
-        return False
-    return True
+    for key in candidates:
+        try:
+            VerifyKey(key).verify(message, signature)
+        except (BadSignatureError, ValueError):
+            continue
+        return True
+
+    log.warning("ton_proof: подпись не сошлась ни с одним из %s ключей", len(candidates))
+    return False
 
 
 # ------------------------------------------------------------------ платежи
@@ -445,13 +493,21 @@ async def verify_payment(
     client = client or get_ton_client()
     tolerance = tolerance if tolerance is not None else Decimal(str(settings.PAYMENT_AMOUNT_TOLERANCE))
 
+    # Недоступность TON API трактуем как «платёж пока не виден», а не как отказ:
+    # фронт продолжит опрашивать, и временный сбой или лимит запросов не выбьет
+    # пользователя из оплаты.
     candidates: list[TxInfo] = []
-    if comment:
-        candidates = await client.find_incoming(destination, comment=comment, since=since)
-    if not candidates and tx_hash:
-        found = await client.get_transaction_by_hash(tx_hash, destination)
-        if found:
-            candidates = [found]
+    try:
+        if comment:
+            candidates = await client.find_incoming(destination, comment=comment, since=since)
+        if not candidates and tx_hash:
+            found = await client.get_transaction_by_hash(tx_hash, destination)
+            if found:
+                candidates = [found]
+    except TonApiError as exc:
+        log.warning("payment check postponed: %s", exc)
+        return PaymentCheck(ok=False, reason="Transaction is not found on-chain yet")
+
     if not candidates:
         return PaymentCheck(ok=False, reason="Transaction not found on-chain")
 

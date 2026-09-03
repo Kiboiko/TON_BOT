@@ -8,9 +8,9 @@ import { useTranslation } from "react-i18next";
 import { ApiError } from "../../api/client";
 import { domainsApi, sitesApi } from "../../api/endpoints";
 import type { DomainCheck, Site, SiteStatus } from "../../api/types";
-import { Badge, Button, Field, Input, Loading, Notice, Segmented } from "../../components/ui";
+import { Badge, Button, Field, Input, Loading, Notice } from "../../components/ui";
 import { useAppStore } from "../../store/app";
-import { haptic, showBackButton } from "../../telegram/webapp";
+import { haptic, openLink, showBackButton } from "../../telegram/webapp";
 import { useTonPayment } from "../payments/useTonPayment";
 
 const DOMAIN_RE = /^[a-z0-9][a-z0-9-]{2,124}$/;
@@ -28,9 +28,9 @@ export function PublishPage() {
   const [status, setStatus] = useState<SiteStatus | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [bagId, setBagId] = useState<string | null>(null);
+  const [publicUrl, setPublicUrl] = useState<string | null>(null);
 
   const [name, setName] = useState("");
-  const [mode, setMode] = useState<"proxy" | "sbt">("proxy");
   const [check, setCheck] = useState<DomainCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -46,6 +46,9 @@ export function PublishPage() {
         setSite(loaded);
         setStatus(loaded.status);
         setBagId(loaded.storage_bag_id);
+        if (loaded.status === "published") {
+          void sitesApi.publishStatus(siteId).then((s) => setPublicUrl(s.public_url));
+        }
         if (loaded.domain) setName(loaded.domain.split(".")[0]);
         if (loaded.status === "publishing") startPolling();
       })
@@ -63,6 +66,7 @@ export function PublishPage() {
         const result = await sitesApi.publishStatus(siteId);
         setStatus(result.status);
         setBagId(result.storage_bag_id);
+        setPublicUrl(result.public_url);
         setPublishError(result.error);
         if (result.status === "publishing") {
           pollTimer.current = setTimeout(() => void tick(), POLL_INTERVAL);
@@ -87,6 +91,10 @@ export function PublishPage() {
     try {
       setCheck(await domainsApi.check(name.trim().toLowerCase()));
     } catch (error) {
+      if (error instanceof ApiError && error.code === "ZONE_NOT_CONFIGURED") {
+        toast(t("domain.zoneNotReady"), "error");
+        return;
+      }
       toastError(error);
     } finally {
       setChecking(false);
@@ -95,11 +103,9 @@ export function PublishPage() {
 
   async function attachDomain(): Promise<void> {
     try {
-      const { transaction } = await domainsApi.deployZone({
+      const { transaction } = await domainsApi.claim({
         site_id: siteId,
-        domain: name.trim().toLowerCase(),
-        tld: "ton",
-        mode,
+        name: name.trim().toLowerCase(),
       });
       const result = await payment.pay(transaction, (txHash) =>
         domainsApi.confirm({ site_id: siteId, tx_hash: txHash }),
@@ -205,7 +211,7 @@ export function PublishPage() {
                     invalid={Boolean(name) && !nameValid}
                   />
                 </div>
-                <span className="card-sub">.ton</span>
+                <span className="card-sub">.{check?.zone ?? t("domain.zoneSuffix")}</span>
                 <Button size="sm" loading={checking} disabled={!nameValid} onClick={() => void checkDomain()}>
                   {t("domain.check")}
                 </Button>
@@ -217,20 +223,11 @@ export function PublishPage() {
                 <Badge kind={check.available ? "success" : "danger"}>
                   {check.available ? t("domain.available") : t("domain.taken")}
                 </Badge>
+                <div className="mono" style={{ marginTop: 6 }}>
+                  {check.domain}
+                </div>
               </div>
             ) : null}
-
-            <div style={{ marginTop: 12 }}>
-              <div className="field-label">{t("domain.mode")}</div>
-              <Segmented<"proxy" | "sbt">
-                value={mode}
-                onChange={setMode}
-                options={[
-                  { value: "proxy", label: t("domain.modeProxy") },
-                  { value: "sbt", label: t("domain.modeSbt") },
-                ]}
-              />
-            </div>
 
             <div style={{ marginTop: 12 }}>
               {payment.isConnected ? (
@@ -280,8 +277,29 @@ export function PublishPage() {
                 })}
               </div>
             ) : null}
+            {publicUrl ? (
+              <div style={{ marginTop: 12 }}>
+                <Button variant="primary" block onClick={() => openLink(publicUrl)}>
+                  🌐 {t("publish.openSite")}
+                </Button>
+                <div
+                  className="mono"
+                  style={{ marginTop: 8, cursor: "pointer" }}
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(publicUrl);
+                    toast(t("common.copied"), "success");
+                  }}
+                >
+                  {publicUrl}
+                </div>
+                <div className="card-sub" style={{ marginTop: 4 }}>
+                  {t("publish.openHint")}
+                </div>
+              </div>
+            ) : null}
+
             {bagId ? (
-              <div style={{ marginTop: 8 }}>
+              <div style={{ marginTop: 12 }}>
                 <div className="card-sub">{t("publish.bagId")}</div>
                 <div className="mono">{bagId}</div>
               </div>

@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 import { adminApi } from "../../api/endpoints";
 import type {
   AdminDomainItem,
+  Zone,
   AdminStats,
   AdminUserDetail,
   AdminUserListItem,
@@ -22,15 +23,17 @@ import {
   Field,
   Input,
   Loading,
+  Notice,
   Segmented,
   Select,
   Sheet,
   Skeletons,
 } from "../../components/ui";
+import { useTonPayment } from "../payments/useTonPayment";
 import { useAppStore } from "../../store/app";
 import { showConfirm } from "../../telegram/webapp";
 
-type Tab = "stats" | "users" | "tariffs" | "domains";
+type Tab = "stats" | "users" | "tariffs" | "domains" | "zone";
 
 const DURATIONS: TariffDuration[] = ["month", "3month", "6month", "12month", "forever"];
 const KINDS: TariffKind[] = ["base", "pro", "custom_code"];
@@ -57,6 +60,7 @@ export function AdminPage() {
           { value: "users", label: t("admin.tabs.users") },
           { value: "tariffs", label: t("admin.tabs.tariffs") },
           { value: "domains", label: t("admin.tabs.domains") },
+          { value: "zone", label: t("admin.tabs.zone") },
         ]}
       />
 
@@ -64,6 +68,7 @@ export function AdminPage() {
       {tab === "users" ? <UsersTab /> : null}
       {tab === "tariffs" ? <TariffsTab /> : null}
       {tab === "domains" ? <DomainsTab /> : null}
+      {tab === "zone" ? <ZoneTab /> : null}
     </div>
   );
 }
@@ -517,6 +522,108 @@ function TariffsTab() {
           </div>
         ) : null}
       </Sheet>
+    </>
+  );
+}
+
+function ZoneTab() {
+  const { t } = useTranslation();
+  const toast = useAppStore((s) => s.toast);
+  const toastError = useAppStore((s) => s.toastError);
+  const payment = useTonPayment();
+
+  const [zone, setZone] = useState<Zone | null>(null);
+  const [form, setForm] = useState({ domain: "", dns_item_address: "", collection_address: "" });
+
+  const load = useCallback(async () => {
+    try {
+      const data = await adminApi.zone();
+      setZone(data);
+      setForm({
+        domain: data.domain,
+        dns_item_address: data.dns_item_address,
+        collection_address: data.collection_address,
+      });
+    } catch (error) {
+      toastError(error);
+    }
+  }, [toastError]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function save(): Promise<void> {
+    try {
+      setZone(await adminApi.updateZone(form));
+      toast(t("common.saved"), "success");
+    } catch (error) {
+      toastError(error);
+    }
+  }
+
+  async function deploy(): Promise<void> {
+    try {
+      const { transaction } = await adminApi.deployZone();
+      const done = await payment.pay(transaction, async () => ({ ok: true }));
+      if (done) toast(t("admin.zone.deployed"), "success");
+    } catch (error) {
+      toastError(error);
+    }
+  }
+
+  if (!zone) return <Skeletons count={1} />;
+
+  return (
+    <>
+      <Notice>{t("admin.zone.hint")}</Notice>
+
+      <div className="card">
+        <div className="row-between">
+          <div className="card-title">{t("admin.zone.status")}</div>
+          <Badge kind={zone.configured ? "success" : "warning"}>
+            {zone.configured ? t("admin.zone.ready") : t("admin.zone.notReady")}
+          </Badge>
+        </div>
+      </div>
+
+      <Field label={t("admin.zone.domain")} hint={t("admin.zone.domainHint")}>
+        <Input
+          value={form.domain}
+          onChange={(value) => setForm((f) => ({ ...f, domain: value }))}
+          placeholder="mysites.ton"
+        />
+      </Field>
+
+      <Field label={t("admin.zone.dnsItem")} hint={t("admin.zone.dnsItemHint")}>
+        <Input
+          value={form.dns_item_address}
+          onChange={(value) => setForm((f) => ({ ...f, dns_item_address: value }))}
+          placeholder="0:…"
+        />
+      </Field>
+
+      <Field label={t("admin.zone.collection")} hint={t("admin.zone.collectionHint")}>
+        <Input
+          value={form.collection_address}
+          onChange={(value) => setForm((f) => ({ ...f, collection_address: value }))}
+          placeholder="0:…"
+        />
+      </Field>
+
+      <Button variant="primary" block onClick={() => void save()}>
+        {t("common.save")}
+      </Button>
+
+      <Button
+        block
+        disabled={!zone.deployable}
+        loading={payment.stage === "signing" || payment.stage === "confirming"}
+        onClick={() => void deploy()}
+      >
+        🚀 {t("admin.zone.deploy")}
+      </Button>
+      <div className="card-sub">{t("admin.zone.deployHint")}</div>
     </>
   );
 }

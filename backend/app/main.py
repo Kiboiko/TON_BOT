@@ -12,9 +12,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import api_router
+from app.api.public import router as public_router
+from app.api.uploads import router as uploads_router
 from app.core.config import settings
 from app.core.errors import register_error_handlers
 from app.services.notifications import close_transport
+from app.services.dns_resolver import close_resolver
 from app.services.storage import close_storage
 from app.services.subdom_client import close_domain_service
 from app.services.ton import close_ton_client
@@ -45,6 +48,7 @@ async def lifespan(_: FastAPI):
     yield
     await close_queue()
     await close_domain_service()
+    await close_resolver()
     await close_ton_client()
     await close_storage()
     await close_transport()
@@ -70,6 +74,10 @@ app.add_middleware(
 
 register_error_handlers(app)
 app.include_router(api_router, prefix=settings.API_PREFIX)
+# опубликованные сайты отдаются с корня: https://host/s/<site_id>
+app.include_router(public_router)
+# загрузка и отдача картинок конструктора
+app.include_router(uploads_router)
 
 
 @app.get("/health", tags=["service"])

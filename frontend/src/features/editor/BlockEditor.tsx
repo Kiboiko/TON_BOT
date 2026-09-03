@@ -2,9 +2,12 @@
  * B2. Редактор одного блока: поля строятся по описанию из каталога,
  * списки (ссылки, кнопки, работы) поддерживают произвольное число элементов.
  */
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { uploadsApi } from "../../api/endpoints";
 import type { Block } from "../../api/types";
 import { Button, Field, Input, Select, Textarea } from "../../components/ui";
+import { useAppStore } from "../../store/app";
 import { BLOCK_SPECS, type FieldSpec } from "../../templates/catalog";
 import { haptic } from "../../telegram/webapp";
 
@@ -46,6 +49,7 @@ function FieldInput({
     return (
       <Field label={label} hint={stringValue ? undefined : "https://…"}>
         <Input value={stringValue} onChange={onChange} placeholder="https://…" inputMode="url" />
+        <ImageUpload onUploaded={onChange} />
         {stringValue ? (
           <img
             src={stringValue}
@@ -74,6 +78,43 @@ function FieldInput({
         inputMode={spec.kind === "url" ? "url" : "text"}
       />
     </Field>
+  );
+}
+
+/** Загрузка картинки с устройства: ссылка подставляется в поле блока. */
+function ImageUpload({ onUploaded }: { onUploaded: (url: string) => void }) {
+  const { t } = useTranslation();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const toastError = useAppStore((s) => s.toastError);
+
+  async function pick(file: File | undefined): Promise<void> {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const { url } = await uploadsApi.image(file);
+      onUploaded(url);
+    } catch (error) {
+      toastError(error);
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 6 }}>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        style={{ display: "none" }}
+        onChange={(e) => void pick(e.target.files?.[0])}
+      />
+      <Button size="sm" loading={busy} onClick={() => inputRef.current?.click()}>
+        📷 {t("editor.uploadImage")}
+      </Button>
+    </div>
   );
 }
 

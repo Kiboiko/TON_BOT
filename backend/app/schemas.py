@@ -164,10 +164,10 @@ class PreviewResponse(BaseModel):
 # --------------------------------------------------------------- domains
 class DomainCheckResponse(BaseModel):
     available: bool
-    status: str
-    domain: str
-    dns_item_address: str | None = None
-    collection_address: str | None = None
+    status: str          # free / taken / unknown
+    domain: str          # полный адрес: имя.зона.ton
+    zone: str            # домен зоны платформы
+    item_address: str | None = None
     owner: str | None = None
 
 
@@ -187,30 +187,51 @@ class TonConnectTransaction(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
-class DeployZoneRequest(BaseModel):
+class DomainClaimRequest(BaseModel):
     site_id: uuid.UUID
-    domain: str = Field(min_length=1, max_length=126)
-    tld: str = "ton"
-    mode: Literal["proxy", "sbt"] = "proxy"
+    name: str = Field(min_length=3, max_length=126)
 
-    @field_validator("domain")
+    @field_validator("name")
     @classmethod
     def _normalize(cls, v: str) -> str:
         return v.strip().lower().rstrip(".")
 
 
-class DeployZoneResponse(BaseModel):
+class DomainClaimResponse(BaseModel):
     transaction: TonConnectTransaction
-    payment_id: uuid.UUID | None = None
+    domain: str
+
+
+# --- зона субдоменов (админ) ---
+class ZoneOut(BaseModel):
+    domain: str
+    dns_item_address: str
+    collection_address: str
+    mode: Literal["proxy", "sbt"]
+    configured: bool     # можно выдавать субдомены
+    deployable: bool     # можно разворачивать зону
+
+
+class ZoneUpdateRequest(BaseModel):
+    domain: str | None = None
+    dns_item_address: str | None = None
+    collection_address: str | None = None
+    mode: Literal["proxy", "sbt"] | None = None
+
+
+class ZoneDeployResponse(BaseModel):
+    transaction: TonConnectTransaction
+    domain: str
 
 
 class DomainConfirmRequest(BaseModel):
     site_id: uuid.UUID
-    tx_hash: str = Field(min_length=8, max_length=128)
+    tx_hash: str = Field(min_length=8, max_length=8192)
 
 
 class DomainConfirmResponse(BaseModel):
     status: str
+    domain: str | None = None
 
 
 class PublishResponse(BaseModel):
@@ -223,6 +244,9 @@ class PublishStatusResponse(BaseModel):
     storage_bag_id: str | None = None
     published_at: datetime | None = None
     error: str | None = None
+    # http-ссылка на опубликованный сайт: домен .ton открывается TON-браузером,
+    # а эта ссылка работает в любом браузере и до привязки домена
+    public_url: str | None = None
 
 
 class DnsBindResponse(BaseModel):
@@ -257,7 +281,10 @@ class PurchaseResponse(BaseModel):
 
 class ConfirmPaymentRequest(BaseModel):
     payment_id: uuid.UUID
-    tx_hash: str = Field(min_length=8, max_length=128)
+    # TON Connect возвращает фронту BOC подписанного сообщения (сотни символов),
+    # а не хэш транзакции: принимаем и то и другое, платёж всё равно ищется
+    # в блокчейне по комментарию-нонсу
+    tx_hash: str = Field(min_length=8, max_length=8192)
 
 
 class SubscriptionOut(ORMModel):
@@ -281,6 +308,12 @@ class CustomCodeRequest(BaseModel):
     html: str = ""
     css: str = ""
     js: str = ""
+
+
+class UploadResponse(BaseModel):
+    url: str
+    size: int
+    mime: str
 
 
 # --------------------------------------------------------------------- payments

@@ -1,11 +1,12 @@
 """A4 (часть 2). Заливка готового сайта в TON Storage.
 
 Зона неопределённости из ТЗ: subdom API закрывает только операции с доменами,
-публикацию контента делаем сами. Поэтому здесь — интерфейс `SiteStorage` и две
-реализации:
+публикацию контента делаем сами. Здесь — интерфейс `SiteStorage` и две реализации:
 
-* `StorageDaemonBackend` — боевой путь: локальный `ton-storage-daemon` c HTTP API,
-  которому мы отдаём каталог с отрендеренным сайтом и получаем bag id (torrent hash).
+* `StorageDaemonBackend` — боевой путь. У `ton-storage-daemon` нет HTTP API, он
+  управляется утилитой `storage-daemon-cli` по управляющему порту, поэтому backend вызывает
+  её как подпроцесс. Демон и backend делят том с готовыми сайтами: путь, который
+  мы передаём в команду `create`, разрешает демон, а не мы.
 * `LocalBackend` — dev-режим: сайт складывается в каталог, bag id считается
   детерминированно от содержимого. Позволяет гонять весь флоу без демона.
 
@@ -13,14 +14,16 @@
 """
 from __future__ import annotations
 
+import asyncio
+import base64
+import binascii
 import hashlib
+import json
 import logging
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
-
-import httpx
 
 from app.core.config import settings
 from app.core.errors import StorageError
@@ -65,81 +68,109 @@ def _dir_stats(path: Path) -> tuple[int, int]:
     return size, files
 
 
-class StorageDaemonBackend:
-    """HTTP-клиент ton-storage-daemon.
+def parse_bag_id(raw: str) -> str:
+    """Приводит bag id к hex-виду.
 
-    Демон должен видеть тот же каталог, что и backend (общий volume), поэтому
-    ему передаётся путь, а не содержимое.
+    CLI отдаёт хэш в base64 (`--json`) или в hex (текстовый вывод), а для
+    DNS-записи нужен ровно 256-битный hex.
+    """
+    raw = (raw or "").strip()
+    if len(raw) == 64 and all(c in "0123456789abcdefABCDEF" for c in raw):
+        return raw.upper()
+    try:
+        decoded = base64.b64decode(raw, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise StorageError(f"Unexpected bag id from storage daemon: {raw[:32]}") from exc
+    if len(decoded) != 32:
+        raise StorageError("Storage daemon returned bag id of wrong length")
+    return decoded.hex().upper()
+
+
+def parse_create_output(stdout: str) -> dict[str, Any]:
+    """Достаёт JSON из вывода CLI: перед ним идут строки лога подключения."""
+    start = stdout.find("{")
+    if start == -1:
+        raise StorageError(f"Storage daemon returned no data: {stdout.strip()[:200]}")
+    try:
+        return json.loads(stdout[start:])
+    except json.JSONDecodeError as exc:
+        raise StorageError("Cannot parse storage daemon response") from exc
+
+
+class StorageDaemonBackend:
+    """Клиент ton-storage-daemon через storage-daemon-cli.
+
+    Ключи для подключения демон генерирует сам при первом старте в
+    `<db>/cli-keys/{client,server.pub}` — этот каталог общий с backend.
     """
 
     def __init__(
         self,
-        api_base: str | None = None,
-        login: str | None = None,
-        password: str | None = None,
-        client: httpx.AsyncClient | None = None,
+        cli: str | None = None,
+        control: str | None = None,
+        key: str | None = None,
+        pub: str | None = None,
+        timeout: float = 180.0,
     ) -> None:
-        self._api_base = (api_base or settings.TON_STORAGE_API).rstrip("/")
-        self._login = login if login is not None else settings.TON_STORAGE_LOGIN
-        self._password = password if password is not None else settings.TON_STORAGE_PASSWORD
-        self._client = client
+        self._cli = cli or settings.TON_STORAGE_CLI
+        self._control = control or settings.TON_STORAGE_CONTROL
+        self._key = key or settings.TON_STORAGE_CLI_KEY
+        self._pub = pub or settings.TON_STORAGE_CLI_PUB
+        self._timeout = timeout
 
-    async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None:
-            auth = (self._login, self._password) if self._login else None
-            self._client = httpx.AsyncClient(base_url=self._api_base, timeout=120.0, auth=auth)
-        return self._client
-
-    async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        client = await self._get_client()
+    async def _run(self, command: str) -> str:
+        args = [
+            self._cli,
+            "-I", self._control,
+            "-k", self._key,
+            "-p", self._pub,
+            "-c", command,
+            "-c", "exit",
+        ]
         try:
-            resp = await client.post(path, json=payload)
-        except (httpx.TimeoutException, httpx.TransportError) as exc:
-            raise StorageError(f"Storage daemon unreachable: {exc}") from exc
-        if resp.status_code >= 400:
-            raise StorageError(f"Storage daemon responded {resp.status_code}: {resp.text[:200]}")
-        try:
-            data = resp.json()
-        except ValueError as exc:
-            raise StorageError("Malformed response from storage daemon") from exc
-        if isinstance(data, dict) and data.get("ok") is False:
-            raise StorageError(str(data.get("error") or "Storage daemon error"))
-        return data if isinstance(data, dict) else {"result": data}
+            process = await asyncio.create_subprocess_exec(
+                *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+        except FileNotFoundError as exc:
+            raise StorageError(f"storage-daemon-cli not found: {self._cli}") from exc
 
-    @staticmethod
-    def _extract_bag_id(data: dict[str, Any]) -> str:
-        for key in ("bag_id", "hash", "torrent_hash", "bagId"):
-            value = data.get(key)
-            if isinstance(value, str) and value:
-                return value
-        for key in ("torrent", "result"):
-            inner = data.get(key)
-            if isinstance(inner, dict):
-                found = StorageDaemonBackend._extract_bag_id(inner)
-                if found:
-                    return found
-        raise StorageError("Storage daemon did not return bag id")
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=self._timeout)
+        except asyncio.TimeoutError as exc:
+            process.kill()
+            raise StorageError("Storage daemon did not respond in time") from exc
+
+        out = stdout.decode("utf-8", "replace")
+        err = stderr.decode("utf-8", "replace")
+        if process.returncode != 0:
+            raise StorageError(f"storage-daemon-cli failed: {(err or out).strip()[:200]}")
+        if "Unknown command" in out or "Error" in err:
+            log.warning("storage-daemon-cli: %s", (err or out).strip()[:200])
+        return out
 
     async def upload_directory(self, path: Path, description: str = "") -> BagInfo:
-        data = await self._post(
-            "/api/v1/create",
-            {"path": str(path), "description": description or path.name, "copy": False},
-        )
-        bag_id = self._extract_bag_id(data)
+        # путь разрешает демон, поэтому каталог обязан быть в общем томе
+        out = await self._run(f"create {path.as_posix()} --json")
+        data = parse_create_output(out)
+        torrent = data.get("torrent") or {}
+        bag_id = parse_bag_id(str(torrent.get("hash", "")))
         size, files = _dir_stats(path)
         log.info("site uploaded to TON Storage: bag=%s files=%s size=%s", bag_id, files, size)
-        return BagInfo(bag_id=bag_id, size=size, files=files, path=str(path))
+        return BagInfo(
+            bag_id=bag_id,
+            size=int(torrent.get("total_size") or size),
+            files=int(torrent.get("files_count") or files),
+            path=str(path),
+        )
 
     async def remove_bag(self, bag_id: str) -> None:
         try:
-            await self._post("/api/v1/remove", {"bag_id": bag_id, "remove_files": False})
+            await self._run(f"remove {bag_id}")
         except StorageError as exc:
             log.warning("cannot remove bag %s: %s", bag_id, exc)
 
     async def close(self) -> None:
-        if self._client is not None:
-            await self._client.aclose()
-            self._client = None
+        return None
 
 
 class LocalBackend:

@@ -43,10 +43,17 @@ from app.schemas import (
     TariffCreateRequest,
     TariffOut,
     TariffUpdateRequest,
+    TonConnectTransaction,
     UserOut,
+    ZoneDeployResponse,
+    ZoneOut,
+    ZoneUpdateRequest,
 )
+from app.api.deps import require_wallet
 from app.services import notifications
 from app.services import subscriptions as subs_service
+from app.services.subdom_client import get_domain_service
+from app.services.zone import get_zone, set_zone
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -328,6 +335,71 @@ async def list_domains(session: SessionDep, admin: AdminUser) -> list[AdminDomai
         )
         for site, user in rows.all()
     ]
+
+
+# --------------------------------------------------------------------- зона
+@router.get("/zone", response_model=ZoneOut)
+async def zone_config(session: SessionDep, admin: AdminUser) -> ZoneOut:
+    """Настройки зоны субдоменов платформы."""
+    zone = await get_zone(session)
+    return ZoneOut(
+        domain=zone.domain,
+        dns_item_address=zone.dns_item_address,
+        collection_address=zone.collection_address,
+        mode=zone.mode,
+        configured=zone.configured,
+        deployable=zone.deployable,
+    )
+
+
+@router.patch("/zone", response_model=ZoneOut)
+async def update_zone(
+    session: SessionDep, admin: AdminUser, body: ZoneUpdateRequest
+) -> ZoneOut:
+    """Правка настроек зоны: домен, его DNS-item и адрес коллекции после разворота."""
+    zone = await set_zone(
+        session,
+        domain=body.domain,
+        dns_item_address=body.dns_item_address,
+        collection_address=body.collection_address,
+        mode=body.mode,
+    )
+    return ZoneOut(
+        domain=zone.domain,
+        dns_item_address=zone.dns_item_address,
+        collection_address=zone.collection_address,
+        mode=zone.mode,
+        configured=zone.configured,
+        deployable=zone.deployable,
+    )
+
+
+@router.post("/zone/deploy", response_model=ZoneDeployResponse)
+async def deploy_zone(session: SessionDep, admin: AdminUser) -> ZoneDeployResponse:
+    """Транзакция разворота зоны субдоменов на домене платформы.
+
+    Операция разовая и подписывается кошельком владельца домена — то есть
+    администратором. После неё в сети появляется коллекция, адрес которой
+    нужно вписать в настройки зоны.
+    """
+    wallet = require_wallet(admin)
+    zone = await get_zone(session)
+    if not zone.deployable:
+        raise BadRequest(
+            "Set zone domain and its DNS item address first", code="ZONE_NOT_CONFIGURED"
+        )
+
+    name, _, tld = zone.domain.partition(".")
+    service = get_domain_service()
+    if zone.mode == "sbt":
+        tx = await service.deploy_sbt_zone(zone.dns_item_address, zone.domain, wallet, tld or "ton")
+    else:
+        tx = await service.deploy_proxy_zone(zone.dns_item_address, name, wallet, tld or "ton")
+
+    await _audit(session, admin, AdminActionType.deploy_zone, None, zone=zone.domain, mode=zone.mode)
+    return ZoneDeployResponse(
+        transaction=TonConnectTransaction(**tx.to_tonconnect()), domain=zone.domain
+    )
 
 
 # --------------------------------------------------------------------- stats

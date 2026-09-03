@@ -17,9 +17,11 @@ os.environ.update(
     TON_VERIFY_MODE="onchain",  # проверка платежей включена: её и тестируем
     TON_STORAGE_MODE="local",
     SITES_BUILD_DIR=str(_tmp / "sites"),
+    UPLOADS_DIR=str(_tmp / "uploads"),
     TELEGRAM_BOT_TOKEN=BOT_TOKEN,
     TREASURY_ADDRESS=TREASURY,
     TONCONNECT_DOMAIN="test.local",
+    MINI_APP_URL="https://test.local",
     ADMIN_TELEGRAM_IDS="777000",
     TRIAL_DAYS="7",
 )
@@ -33,6 +35,7 @@ from app.core.telegram_auth import build_init_data  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services import notifications  # noqa: E402
 from app.services.storage import LocalBackend, set_storage  # noqa: E402
+from app.services.dns_resolver import FakeResolver, set_resolver  # noqa: E402
 from app.services.subdom_client import FakeDomainService, set_domain_service  # noqa: E402
 from app.services.ton import MockTonClient, set_ton_client  # noqa: E402
 from app.workers.queue import MemoryQueue, set_queue  # noqa: E402
@@ -68,6 +71,14 @@ def domain_service() -> FakeDomainService:
 
 
 @pytest.fixture
+def resolver() -> FakeResolver:
+    r = FakeResolver()
+    set_resolver(r)
+    yield r
+    set_resolver(None)
+
+
+@pytest.fixture
 def ton() -> MockTonClient:
     client = MockTonClient()
     set_ton_client(client)
@@ -100,7 +111,7 @@ def notifier() -> notifications.NullTransport:
 
 
 @pytest_asyncio.fixture
-async def client(db, domain_service, ton, queue, storage, notifier):
+async def client(db, domain_service, resolver, ton, queue, storage, notifier):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac

@@ -17,8 +17,10 @@ import { haptic } from "../../telegram/webapp";
 
 export type PaymentStage = "idle" | "signing" | "confirming" | "done" | "error";
 
-const CONFIRM_RETRIES = 5;
-const CONFIRM_DELAY = 4000;
+// подтверждение ждём около 40 секунд: столько может занять попадание
+// транзакции в индекс TON API после подписи в кошельке
+const CONFIRM_RETRIES = 8;
+const CONFIRM_DELAY = 5000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

@@ -103,6 +103,7 @@ class AdminActionType(str, enum.Enum):
     change_price = "change_price"
     create_tariff = "create_tariff"
     delete_tariff = "delete_tariff"
+    deploy_zone = "deploy_zone"
 
 
 class User(Base):
@@ -286,4 +287,20 @@ class TonProofPayload(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class AppSetting(Base):
+    """Настройки, которые меняет администратор без передеплоя.
+
+    Адрес коллекции субдоменов известен только после того, как владелец домена
+    подпишет транзакцию разворота зоны, — держать его в .env неудобно.
+    """
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=utcnow, nullable=False
     )

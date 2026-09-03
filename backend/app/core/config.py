@@ -71,12 +71,25 @@ class Settings(BaseSettings):
     # http — реальный сервис, fake — встроенная заглушка (dev/тесты)
     SUBDOM_MODE: Literal["http", "fake"] = "http"
 
+    # --- зона субдоменов ---
+    # Платформа владеет одним доменом .ton и один раз разворачивает на нём зону;
+    # пользователи получают субдомены внутри неё: имя.ZONE_DOMAIN
+    ZONE_DOMAIN: str = ""              # например tonsite.ton
+    ZONE_DNS_ITEM_ADDRESS: str = ""    # адрес DNS-item этого домена
+    ZONE_COLLECTION_ADDRESS: str = ""  # адрес коллекции после разворота зоны
+    ZONE_MODE: Literal["proxy", "sbt"] = "proxy"
+    # Резолвер TON DNS для проверки занятости имени
+    TON_DNS_API: str = "https://tonapi.io"
+
     # --- TON Storage ---
-    # daemon — ton-storage-daemon HTTP API, local — выкладка в локальную директорию (dev)
+    # daemon — настоящий ton-storage-daemon, local — выкладка в каталог (dev)
     TON_STORAGE_MODE: Literal["daemon", "local"] = "local"
-    TON_STORAGE_API: str = "http://storage-daemon:5555"
-    TON_STORAGE_LOGIN: str = ""
-    TON_STORAGE_PASSWORD: str = ""
+    # У демона нет HTTP API: управление идёт утилитой storage-daemon-cli
+    # по управляющему порту, ключи демон генерирует сам при первом старте.
+    TON_STORAGE_CLI: str = "storage-daemon-cli"
+    TON_STORAGE_CONTROL: str = "storage-daemon:5555"
+    TON_STORAGE_CLI_KEY: str = "/var/ton-work/db/cli-keys/client"
+    TON_STORAGE_CLI_PUB: str = "/var/ton-work/db/cli-keys/server.pub"
     # Директория, куда рендерятся сайты перед заливкой (общий volume с storage-daemon)
     SITES_BUILD_DIR: str = "/data/sites"
     PUBLIC_SITE_BASE_URL: str = ""  # опционально: http-зеркало для превью
@@ -85,6 +98,10 @@ class Settings(BaseSettings):
     TRIAL_DAYS: int = 7
     EXPIRING_SOON_DAYS: int = 3
     SCHEDULER_INTERVAL: int = 300  # сек между прогонами планировщика
+
+    # --- загрузка изображений ---
+    UPLOADS_DIR: str = "/data/uploads"
+    MAX_UPLOAD_BYTES: int = 5 * 1024 * 1024
 
     # --- лимиты пользовательского контента ---
     MAX_CONTENT_JSON_BYTES: int = 512_000

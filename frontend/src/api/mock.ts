@@ -266,6 +266,7 @@ async function handler(method: Method, path: string, options: RequestOptions): P
         storage_bag_id: site.storage_bag_id,
         published_at: site.published_at,
         error: null,
+        public_url: site.status === "published" ? `${window.location.origin}/s/${site.id}` : null,
       };
     }
     if (tail === "/dns-bind") return { transaction: fakeTransaction("0.05") };

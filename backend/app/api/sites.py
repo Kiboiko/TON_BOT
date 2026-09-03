@@ -35,6 +35,7 @@ from app.schemas import (
 )
 from app.services import payments as payments_service
 from app.services import subscriptions as subs_service
+from app.api.public import public_site_url
 from app.services.dns import build_set_storage_transaction
 from app.services.publishing import build_site_html, enqueue_publish
 from app.services.renderer import content_size, default_content_for, render_site
@@ -153,6 +154,7 @@ async def publish_status(
         storage_bag_id=site.storage_bag_id,
         published_at=site.published_at,
         error=site.publish_error,
+        public_url=public_site_url(site),
     )
 
 

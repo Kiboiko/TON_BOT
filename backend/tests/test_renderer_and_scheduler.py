@@ -247,3 +247,46 @@ async def test_forever_subscription_never_expires(client):
     subs = await client.get("/api/subscriptions", headers=h)
     assert subs.json()[0]["is_forever"] is True
     assert subs.json()[0]["status"] == "active"
+
+
+async def test_image_upload(client):
+    """Картинка принимается по сигнатуре файла, а не по присланному типу."""
+    import struct, zlib
+
+    def png(width: int = 1) -> bytes:
+        raw = b"\x00" + b"\xff\x00\x00" * width
+
+        def chunk(tag: bytes, data: bytes) -> bytes:
+            return (
+                struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+            )
+
+        return (
+            b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, 1, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw))
+            + chunk(b"IEND", b"")
+        )
+
+    h = headers_for(4010)
+    resp = await client.post("/api/uploads", headers=h, files={"file": ("photo.png", png(), "image/png")})
+    assert resp.status_code == 200, resp.text
+    url = resp.json()["url"]
+    assert resp.json()["mime"] == "image/png"
+
+    # файл отдаётся по ссылке без авторизации — он нужен опубликованному сайту
+    served = await client.get(url[url.index("/u/"):])
+    assert served.status_code == 200
+    assert served.content.startswith(b"\x89PNG")
+
+    # подделанный content-type не помогает: смотрим на содержимое
+    bad = await client.post(
+        "/api/uploads", headers=h, files={"file": ("evil.svg", b"<svg onload=alert(1)>", "image/png")}
+    )
+    assert bad.status_code == 400
+    assert bad.json()["error"]["code"] == "UNSUPPORTED_IMAGE"
+
+    # без авторизации загрузка недоступна
+    anon = await client.post("/api/uploads", files={"file": ("photo.png", png(), "image/png")})
+    assert anon.status_code == 401

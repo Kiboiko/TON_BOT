@@ -124,7 +124,11 @@ async def confirm_payment(
         await session.flush()
         raise PaymentNotConfirmed(check.reason or "Transaction is not confirmed on-chain")
 
-    payment.tx_hash = check.tx.tx_hash if check.tx and check.tx.tx_hash else tx_hash
+    # в колонке 128 символов, а BOC длиннее — храним хэш найденной транзакции,
+    # и только если её нет (mock-режим) — присланное значение, обрезанное по длине
+    payment.tx_hash = (
+        check.tx.tx_hash if check.tx and check.tx.tx_hash else tx_hash[:128]
+    )
     payment.status = PaymentStatus.confirmed
     payment.confirmed_at = utcnow()
     payment.error = None
