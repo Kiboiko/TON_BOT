@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next";
 import { ApiError } from "../../api/client";
 import { domainsApi, sitesApi } from "../../api/endpoints";
 import type { DomainCheck, Site, SiteStatus } from "../../api/types";
-import { Badge, Button, Field, Input, Loading, Notice } from "../../components/ui";
+import { Badge, Button, Field, Input, Loading, Notice, Segmented } from "../../components/ui";
 import { useAppStore } from "../../store/app";
 import { haptic, openLink, showBackButton } from "../../telegram/webapp";
 import { useTonPayment } from "../payments/useTonPayment";
@@ -30,7 +30,11 @@ export function PublishPage() {
   const [bagId, setBagId] = useState<string | null>(null);
   const [publicUrl, setPublicUrl] = useState<string | null>(null);
 
+  // ТЗ допускает и свой домен, и субдомен: «мини-сайты на доменах/субдоменах TON»
+  const [mode, setMode] = useState<"subdomain" | "own">("subdomain");
   const [name, setName] = useState("");
+  const [ownDomain, setOwnDomain] = useState("");
+  const [attaching, setAttaching] = useState(false);
   const [check, setCheck] = useState<DomainCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -98,6 +102,23 @@ export function PublishPage() {
       toastError(error);
     } finally {
       setChecking(false);
+    }
+  }
+
+  async function attachOwnDomain(): Promise<void> {
+    const domain = ownDomain.trim().toLowerCase();
+    if (!domain.includes(".")) return;
+    setAttaching(true);
+    try {
+      const result = await domainsApi.attach({ site_id: siteId, domain });
+      toast(t("domain.attached"), "success");
+      const { site: updated } = await sitesApi.get(siteId);
+      setSite(updated);
+      if (result.needs_publish) await publish();
+    } catch (error) {
+      toastError(error);
+    } finally {
+      setAttaching(false);
     }
   }
 
@@ -198,6 +219,44 @@ export function PublishPage() {
           </div>
         ) : (
           <>
+            <Segmented<"subdomain" | "own">
+              value={mode}
+              onChange={setMode}
+              options={[
+                { value: "subdomain", label: t("domain.modeSubdomain") },
+                { value: "own", label: t("domain.modeOwn") },
+              ]}
+            />
+
+            {mode === "own" ? (
+              <div style={{ marginTop: 12 }}>
+                <Field label={t("domain.ownLabel")} hint={t("domain.ownHint")}>
+                  <Input
+                    value={ownDomain}
+                    onChange={(value) => setOwnDomain(value.toLowerCase())}
+                    placeholder="mysite.ton"
+                  />
+                </Field>
+                <div style={{ marginTop: 10 }}>
+                  {payment.isConnected ? (
+                    <Button
+                      variant="primary"
+                      block
+                      loading={attaching}
+                      disabled={!ownDomain.includes(".")}
+                      onClick={() => void attachOwnDomain()}
+                    >
+                      {t("domain.attachOwn")}
+                    </Button>
+                  ) : (
+                    <Button variant="primary" block onClick={payment.connect}>
+                      {t("domain.connectWallet")}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <>
             <Field error={name && !nameValid ? t("domain.invalid") : undefined}>
               <div className="row">
                 <div className="grow">
@@ -247,6 +306,8 @@ export function PublishPage() {
               )}
             </div>
             {payment.stage === "confirming" ? <Notice>{t("domain.waiting")}</Notice> : null}
+              </>
+            )}
           </>
         )}
       </div>

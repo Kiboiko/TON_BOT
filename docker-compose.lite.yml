@@ -1,0 +1,62 @@
+# Облегчённый профиль: сервер на 1 ГБ RAM, где уже что-то работает (например VPN).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.lite.yml up -d
+#
+# Что отличается от обычного запуска:
+#   * не поднимается storage-daemon — публикация идёт в локальный каталог
+#     (TON_STORAGE_MODE=local); образ backend собирается без CLI-утилиты и
+#     весит на полтора гигабайта меньше;
+#   * планировщик подписок не висит резидентно (экономит ~170 МБ) — его
+#     запускают по расписанию, см. README-строку внизу файла;
+#   * у каждого сервиса выставлен лимит памяти: если что-то потечёт, ядро
+#     прибьёт именно этот контейнер, а не соседние процессы вроде VPN.
+#
+# Итог примерно 460 МБ вместо 740 МБ.
+
+services:
+  backend:
+    build:
+      target: lite
+    mem_limit: 220m
+
+  worker:
+    build:
+      target: lite
+    mem_limit: 220m
+
+  bot:
+    build:
+      target: lite
+    mem_limit: 200m
+
+  migrate:
+    build:
+      target: lite
+    mem_limit: 220m
+
+  # Планировщик не запускается вместе со стеком: profiles исключает его из
+  # `up` без явного упоминания. Прогон раз в час через cron на хосте:
+  #
+  #   0 * * * * cd /opt/tsb && docker compose -f docker-compose.yml \
+  #     -f docker-compose.lite.yml run --rm scheduler python -c \
+  #     "import asyncio; from app.workers.scheduler import run_once; asyncio.run(run_once())"
+  scheduler:
+    build:
+      target: lite
+    mem_limit: 220m
+    profiles: ["scheduler"]
+
+  postgres:
+    mem_limit: 180m
+    # На 1 ГБ памяти настройки Postgres по умолчанию избыточны
+    command: >
+      postgres -c shared_buffers=48MB -c max_connections=40
+               -c work_mem=2MB -c maintenance_work_mem=32MB
+
+  redis:
+    mem_limit: 48m
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "32mb",
+              "--maxmemory-policy", "allkeys-lru"]
+
+  nginx:
+    mem_limit: 48m

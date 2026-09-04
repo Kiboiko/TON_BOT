@@ -363,3 +363,56 @@ async def test_published_site_is_served_publicly(client, queue, storage):
     assert page.status_code == 200
     assert "Привет из TON" in page.text
     assert page.headers["content-type"].startswith("text/html")
+
+
+async def test_attach_own_domain(client, resolver, queue, storage):
+    """Свой домен .ton привязывается к сайту без зоны платформы (ТЗ: «Привязанный домен»)."""
+    h = headers_for(2009, "domain_owner")
+    created = await client.post("/api/sites", headers=h, json={"type": "visitka", "title": "Свой домен"})
+    site_id = created.json()["site"]["id"]
+    wallet = "0:" + "7" * 64
+
+    # без кошелька привязывать нечего
+    no_wallet = await client.post(
+        "/api/domains/attach", headers=h, json={"site_id": site_id, "domain": "mysite.ton"}
+    )
+    assert no_wallet.status_code == 401
+
+    async with SessionLocal() as session:
+        from app.models import User
+
+        user = await session.scalar(select(User).where(User.telegram_id == 2009))
+        user.wallet_address = wallet
+        await session.commit()
+
+    # незарегистрированный домен привязать нельзя
+    free = await client.post(
+        "/api/domains/attach", headers=h, json={"site_id": site_id, "domain": "notbought.ton"}
+    )
+    assert free.status_code == 400
+    assert free.json()["error"]["code"] == "DOMAIN_NOT_REGISTERED"
+
+    # чужой домен — тоже
+    resolver.own("someoneelse.ton", "0:" + "9" * 64)
+    foreign = await client.post(
+        "/api/domains/attach", headers=h, json={"site_id": site_id, "domain": "someoneelse.ton"}
+    )
+    assert foreign.status_code == 409
+    assert foreign.json()["error"]["code"] == "DOMAIN_NOT_OWNED"
+
+    # свой домен привязывается, а зона платформы для этого не нужна
+    resolver.own("mysite.ton", wallet, item_address="0:" + "ee" * 32)
+    ok = await client.post(
+        "/api/domains/attach", headers=h, json={"site_id": site_id, "domain": "mysite.ton"}
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["domain"] == "mysite.ton"
+
+    # после публикации домен можно направить на сайт DNS-записью
+    await client.post(f"/api/sites/{site_id}/publish", headers=h)
+    job = await queue.dequeue(timeout=1)
+    await run_publish_job(job.payload["site_id"])
+
+    bind = await client.post(f"/api/sites/{site_id}/dns-bind", headers=h)
+    assert bind.status_code == 200, bind.text
+    assert bind.json()["transaction"]["messages"][0]["payload"]

@@ -78,6 +78,12 @@ export const domainsApi = {
   check: (name: string) => api.get<DomainCheck>("/domains/check", { name }),
   claim: (body: { site_id: string; name: string }) =>
     api.post<{ transaction: TonConnectTransaction; domain: string }>("/domains/claim", body),
+  // привязка домена .ton, которым пользователь уже владеет
+  attach: (body: { site_id: string; domain: string }) =>
+    api.post<{ domain: string; item_address: string | null; needs_publish: boolean }>(
+      "/domains/attach",
+      body,
+    ),
   confirm: (body: { site_id: string; tx_hash: string }) =>
     api.post<{ status: string; domain: string | null }>("/domains/confirm", body),
 };

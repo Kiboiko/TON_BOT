@@ -21,6 +21,8 @@ from app.api.deps import CurrentUser, SessionDep, require_wallet
 from app.core.errors import BadRequest, Conflict, NotFound
 from app.models import Site, SiteStatus
 from app.schemas import (
+    DomainAttachRequest,
+    DomainAttachResponse,
     DomainCheckResponse,
     DomainClaimRequest,
     DomainClaimResponse,
@@ -108,6 +110,49 @@ async def claim_domain(
 
     return DomainClaimResponse(
         transaction=TonConnectTransaction(**tx.to_tonconnect()), domain=domain
+    )
+
+
+@router.post("/attach", response_model=DomainAttachResponse)
+async def attach_domain(
+    session: SessionDep, user: CurrentUser, body: DomainAttachRequest
+) -> DomainAttachResponse:
+    """Привязывает к сайту домен, которым пользователь уже владеет.
+
+    Зона платформы здесь не нужна: домен существует, разворачивать нечего.
+    Достаточно убедиться, что кошелёк пользователя действительно им владеет,
+    и запомнить адрес DNS-item — по нему потом собирается транзакция
+    DNS-записи (/api/sites/{id}/dns-bind), которая направит домен на сайт.
+    """
+    wallet = require_wallet(user)
+    site = await session.get(Site, body.site_id)
+    if site is None or site.user_id != user.id:
+        raise NotFound("Site not found", code="SITE_NOT_FOUND")
+
+    domain = body.domain
+    if "." not in domain:
+        raise BadRequest("Enter the full domain, for example mysite.ton", code="INVALID_DOMAIN_NAME")
+
+    info = await get_resolver().resolve(domain)
+    if info.available:
+        raise BadRequest(
+            "This domain is not registered yet — buy it first", code="DOMAIN_NOT_REGISTERED"
+        )
+    if info.status == "unknown":
+        raise BadRequest("Cannot check the domain right now, try again", code="DOMAIN_CHECK_FAILED")
+    if not same_address(info.owner, wallet):
+        raise Conflict("This domain belongs to another wallet", code="DOMAIN_NOT_OWNED")
+
+    site.domain = domain
+    site.tld = domain.split(".")[-1]
+    site.dns_item_address = info.item_address
+    await session.flush()
+    log.info("domain %s attached to site %s", domain, site.id)
+
+    return DomainAttachResponse(
+        domain=domain,
+        item_address=info.item_address,
+        needs_publish=site.status != SiteStatus.published,
     )
 
 

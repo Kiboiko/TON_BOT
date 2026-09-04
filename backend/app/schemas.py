@@ -202,6 +202,25 @@ class DomainClaimResponse(BaseModel):
     domain: str
 
 
+class DomainAttachRequest(BaseModel):
+    """Привязка домена .ton, которым пользователь уже владеет."""
+
+    site_id: uuid.UUID
+    domain: str = Field(min_length=3, max_length=255)
+
+    @field_validator("domain")
+    @classmethod
+    def _normalize_domain(cls, v: str) -> str:
+        return v.strip().lower().rstrip(".")
+
+
+class DomainAttachResponse(BaseModel):
+    domain: str
+    item_address: str | None = None
+    # транзакция DNS-записи приходит отдельно: /api/sites/{id}/dns-bind
+    needs_publish: bool = True
+
+
 # --- зона субдоменов (админ) ---
 class ZoneOut(BaseModel):
     domain: str
