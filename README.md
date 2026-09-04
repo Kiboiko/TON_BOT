@@ -13,6 +13,7 @@ Telegram Mini App для создания и публикации мини-са�
 ## Документация
 
 * [docs/DEPLOY.md](docs/DEPLOY.md) — развёртывание на чистом сервере, пошагово
+* [docs/QUICKSTART_SERVER.md](docs/QUICKSTART_SERVER.md) — короткий прогон на сервере за двое суток: где взять сервер, домен и `.ton`
 * [docs/API.md](docs/API.md) — API-контракт, коды ошибок, отличия от ТЗ
 * [docs/content_json.md](docs/content_json.md) — структура content_json всех 6 шаблонов
 * [docs/openapi.json](docs/openapi.json) — OpenAPI-схема для мок-сервера фронта
