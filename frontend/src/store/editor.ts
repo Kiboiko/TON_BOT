@@ -5,6 +5,7 @@
  * backend с задержкой (автосохранение), чтобы каждый ввод символа не рождал запрос.
  */
 import { create } from "zustand";
+import { ApiError } from "../api/client";
 import { sitesApi } from "../api/endpoints";
 import type { Block, BlockType, Site, SiteContent } from "../api/types";
 import { createBlock } from "../templates/catalog";
@@ -19,12 +20,18 @@ interface EditorState {
   content: SiteContent | null;
   title: string;
   saveState: SaveState;
+  /** Текст последней ошибки автосохранения — чтобы не показывать немой красный бейдж. */
+  saveError: string | null;
+  /** Сайт удалён на сервере: сохранять больше некуда, автосохранение выключено. */
+  siteMissing: boolean;
   selectedBlockId: string | null;
   history: SiteContent[];
   future: SiteContent[];
 
   load: (site: Site) => void;
   reset: () => void;
+  /** Сброс, если в редакторе открыт именно этот сайт (например, его удалили из списка). */
+  discardIfLoaded: (siteId: string) => void;
   select: (blockId: string | null) => void;
 
   setTitle: (title: string) => void;
@@ -52,6 +59,8 @@ function clone(content: SiteContent): SiteContent {
 export const useEditorStore = create<EditorState>((set, get) => {
   function scheduleSave(): void {
     if (saveTimer) clearTimeout(saveTimer);
+    // сайта на сервере уже нет — новые попытки дадут те же 404
+    if (get().siteMissing) return;
     set({ saveState: "dirty" });
     saveTimer = setTimeout(() => {
       void get().saveNow();
@@ -72,6 +81,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     content: null,
     title: "",
     saveState: "idle",
+    saveError: null,
+    siteMissing: false,
     selectedBlockId: null,
     history: [],
     future: [],
@@ -83,6 +94,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
         content: clone(site.content_json),
         title: site.title,
         saveState: "idle",
+        saveError: null,
+        siteMissing: false,
         selectedBlockId: null,
         history: [],
         future: [],
@@ -91,7 +104,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     reset() {
       if (saveTimer) clearTimeout(saveTimer);
-      set({ site: null, content: null, title: "", saveState: "idle", history: [], future: [] });
+      set({
+        site: null,
+        content: null,
+        title: "",
+        saveState: "idle",
+        saveError: null,
+        siteMissing: false,
+        history: [],
+        future: [],
+      });
+    },
+
+    discardIfLoaded(siteId) {
+      if (get().site?.id === siteId) get().reset();
     },
 
     select(blockId) {
@@ -188,12 +214,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
         clearTimeout(saveTimer);
         saveTimer = null;
       }
+      if (get().siteMissing) return;
       set({ saveState: "saving" });
       try {
         const { site: saved } = await sitesApi.update(site.id, { title, content_json: content });
-        set({ site: saved, saveState: "saved" });
-      } catch {
-        set({ saveState: "error" });
+        set({ site: saved, saveState: "saved", saveError: null });
+      } catch (error) {
+        // сайт удалён (в другом окне или на другом устройстве) — сохранять некуда,
+        // и повторять бессмысленно: без этого редактор молча долбился в 404
+        const missing = error instanceof ApiError && error.status === 404;
+        set({
+          saveState: "error",
+          siteMissing: missing,
+          saveError: error instanceof Error ? error.message : String(error),
+        });
       }
     },
   };

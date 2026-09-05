@@ -90,6 +90,9 @@ export const en: Translations = {
     itemNumber: "{{label}} {{number}}",
     imageHint: "Paste an image URL",
     uploadImage: "Upload photo",
+    saveFailed: "Could not save: {{reason}}",
+    siteMissing: "This site was deleted — there is nothing to save into. Open the list and create a new one.",
+    backToSites: "Back to sites",
   },
   preview: {
     title: "Preview",

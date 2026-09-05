@@ -7,7 +7,18 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { sitesApi } from "../../api/endpoints";
 import type { BlockType, SiteContent, ThemePreset } from "../../api/types";
-import { Badge, Button, Empty, Field, Input, Loading, Segmented, Sheet, Textarea } from "../../components/ui";
+import {
+  Badge,
+  Button,
+  Empty,
+  Field,
+  Input,
+  Loading,
+  Notice,
+  Segmented,
+  Sheet,
+  Textarea,
+} from "../../components/ui";
 import {
   ACCENT_COLORS,
   BLOCK_CATALOG,
@@ -97,6 +108,21 @@ export function EditorPage() {
 
   return (
     <div className="page">
+      {editor.siteMissing ? (
+        <Notice kind="danger">
+          <div>
+            {t("editor.siteMissing")}
+            <div style={{ marginTop: 8 }}>
+              <Button size="sm" variant="primary" onClick={() => navigate("/sites")}>
+                {t("editor.backToSites")}
+              </Button>
+            </div>
+          </div>
+        </Notice>
+      ) : editor.saveState === "error" ? (
+        <Notice kind="danger">{t("editor.saveFailed", { reason: editor.saveError ?? "" })}</Notice>
+      ) : null}
+
       <div className="page-header">
         <div className="grow">
           <h1>{editor.title || t("editor.title")}</h1>

@@ -8,6 +8,7 @@ import type { SiteListItem, SiteStatus, SiteType } from "../../api/types";
 import { Badge, Button, Empty, Field, Input, Sheet, Skeletons } from "../../components/ui";
 import { TEMPLATES } from "../../templates/catalog";
 import { useAppStore } from "../../store/app";
+import { useEditorStore } from "../../store/editor";
 import { haptic, showConfirm } from "../../telegram/webapp";
 
 const STATUS_KIND: Record<SiteStatus, "default" | "success" | "warning" | "danger" | "accent"> = {
@@ -78,6 +79,8 @@ export function SitesPage() {
     if (!confirmed) return;
     try {
       await sitesApi.remove(site.id);
+      // гасим редактор этого сайта: иначе отложенное автосохранение уйдёт в удалённый id
+      useEditorStore.getState().discardIfLoaded(site.id);
       setSites((prev) => (prev ?? []).filter((s) => s.id !== site.id));
       setLimitReached(false);
       toast(t("common.done"), "success");

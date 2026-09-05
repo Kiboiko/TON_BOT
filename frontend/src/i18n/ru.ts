@@ -89,6 +89,9 @@ export const ru = {
     itemNumber: "{{label}} {{number}}",
     imageHint: "Вставьте ссылку на изображение",
     uploadImage: "Загрузить фото",
+    saveFailed: "Не удалось сохранить: {{reason}}",
+    siteMissing: "Сайт удалён — сохранять больше некуда. Откройте список сайтов и создайте новый.",
+    backToSites: "К списку сайтов",
   },
   preview: {
     title: "Предпросмотр",

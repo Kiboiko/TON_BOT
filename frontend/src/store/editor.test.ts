@@ -1,5 +1,7 @@
 /** Логика конструктора: добавление, перемещение, скрытие блоков, undo/redo. */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../api/client";
+import { sitesApi } from "../api/endpoints";
 import type { Site } from "../api/types";
 import { defaultContentFor } from "../templates/catalog";
 
@@ -88,5 +90,54 @@ describe("editor store", () => {
 
     await useEditorStore.getState().saveNow();
     expect(useEditorStore.getState().saveState).toBe("saved");
+  });
+});
+
+describe("автосохранение при удалённом сайте", () => {
+  beforeEach(() => {
+    useEditorStore.getState().reset();
+    useEditorStore.getState().load(site);
+    vi.mocked(sitesApi.update).mockReset();
+  });
+
+  it("после 404 помечает сайт удалённым и больше не сохраняет", async () => {
+    vi.mocked(sitesApi.update).mockRejectedValue(
+      new ApiError(404, { code: "SITE_NOT_FOUND", message: "Сайт не найден" }),
+    );
+
+    await useEditorStore.getState().saveNow();
+
+    expect(useEditorStore.getState().saveState).toBe("error");
+    expect(useEditorStore.getState().siteMissing).toBe(true);
+    expect(useEditorStore.getState().saveError).toContain("Сайт не найден");
+
+    // дальнейшие правки не должны порождать новые запросы в удалённый сайт
+    const before = vi.mocked(sitesApi.update).mock.calls.length;
+    const state = useEditorStore.getState();
+    state.updateBlock(state.content!.blocks[0].id, { title: "Ещё правка" });
+    await useEditorStore.getState().saveNow();
+    expect(vi.mocked(sitesApi.update).mock.calls.length).toBe(before);
+  });
+
+  it("обычную ошибку сети не считает удалением и даёт сохранить снова", async () => {
+    vi.mocked(sitesApi.update).mockRejectedValueOnce(
+      new ApiError(0, { code: "NETWORK_ERROR", message: "Нет связи" }),
+    );
+    await useEditorStore.getState().saveNow();
+    expect(useEditorStore.getState().siteMissing).toBe(false);
+
+    vi.mocked(sitesApi.update).mockResolvedValueOnce({ site });
+    await useEditorStore.getState().saveNow();
+    expect(useEditorStore.getState().saveState).toBe("saved");
+    expect(useEditorStore.getState().saveError).toBeNull();
+  });
+
+  it("удаление сайта из списка сбрасывает редактор", () => {
+    useEditorStore.getState().discardIfLoaded("другой-сайт");
+    expect(useEditorStore.getState().site).not.toBeNull();
+
+    useEditorStore.getState().discardIfLoaded(site.id);
+    expect(useEditorStore.getState().site).toBeNull();
+    expect(useEditorStore.getState().content).toBeNull();
   });
 });
