@@ -333,7 +333,15 @@ async def close_ton_client() -> None:
 def build_ton_proof_message(
     address: str, domain: str, timestamp: int, payload: str
 ) -> bytes:
-    """Собирает сообщение, которое кошелёк подписывает при ton_proof (TON Connect v2)."""
+    """Дайджест, который кошелёк подписывает при ton_proof (TON Connect v2).
+
+    По спецификации подпись ставится на ДВОЙНОЙ хэш:
+
+        message = "ton-proof-item-v2/" ++ Address ++ AppDomain ++ Timestamp ++ Payload
+        digest  = sha256(0xffff ++ "ton-connect" ++ sha256(message))
+
+    Внешний sha256 обязателен: без него подпись настоящего кошелька не сойдётся.
+    """
     wc_str, _, hex_hash = normalize_address(address).partition(":")
     workchain = int(wc_str)
     addr_hash = bytes.fromhex(hex_hash)
@@ -348,7 +356,7 @@ def build_ton_proof_message(
         + timestamp.to_bytes(8, "little")
         + payload.encode()
     )
-    return TON_CONNECT_PREFIX + hashlib.sha256(message).digest()
+    return hashlib.sha256(TON_CONNECT_PREFIX + hashlib.sha256(message).digest()).digest()
 
 
 def pubkeys_from_state_init(state_init_b64: str, address: str) -> list[bytes]:

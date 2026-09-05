@@ -160,6 +160,34 @@ async def test_verify_payment_checks_amount_and_destination():
     assert "not found" in (missing.reason or "")
 
 
+def test_ton_proof_digest_matches_spec():
+    """Дайджест считается независимо по формуле из спецификации TON Connect.
+
+    Раньше тест подписывал той же функцией, которую и проверял, поэтому не заметил
+    пропущенный внешний sha256 — настоящие кошельки при этом не проходили.
+    """
+    import hashlib
+
+    address = "0:" + "5c" * 32
+    domain, payload, ts = "example.com", "nonce-1", 1700000000
+
+    message = (
+        b"ton-proof-item-v2/"
+        + (0).to_bytes(4, "big", signed=True)
+        + bytes.fromhex("5c" * 32)
+        + len(domain.encode()).to_bytes(4, "little")
+        + domain.encode()
+        + ts.to_bytes(8, "little")
+        + payload.encode()
+    )
+    expected = hashlib.sha256(
+        bytes([0xFF, 0xFF]) + b"ton-connect" + hashlib.sha256(message).digest()
+    ).digest()
+
+    assert build_ton_proof_message(address, domain, ts, payload) == expected
+    assert len(expected) == 32
+
+
 async def test_ton_proof_signature_roundtrip():
     """Валидная подпись принимается, любая подмена — отвергается."""
     key = SigningKey.generate()

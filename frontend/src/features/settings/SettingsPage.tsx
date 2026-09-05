@@ -30,6 +30,8 @@ export function SettingsPage() {
 
   const [proofPending, setProofPending] = useState(false);
   const [proofFailed, setProofFailed] = useState(false);
+  // счётчик повторов: менять ref недостаточно, эффект должен перезапуститься
+  const [retry, setRetry] = useState(0);
   // адреса, для которых доказательство уже отправляли: повтор только по кнопке,
   // иначе ошибка проверки уводит эффект в бесконечный цикл
   const attempted = useRef<Set<string>>(new Set());
@@ -85,7 +87,7 @@ export function SettingsPage() {
         toastError(error);
       })
       .finally(() => setProofPending(false));
-  }, [wallet, proofPending, setWallet, t, toast, toastError]);
+  }, [wallet, proofPending, retry, setWallet, t, toast, toastError]);
 
   const address = user?.wallet_address ?? wallet?.account.address ?? null;
 
@@ -124,6 +126,7 @@ export function SettingsPage() {
               onClick={() => {
                 attempted.current.clear();
                 setProofFailed(false);
+                setRetry((n) => n + 1); // перезапускаем эффект, иначе повтора не будет
               }}
             >
               {t("common.retry")}
