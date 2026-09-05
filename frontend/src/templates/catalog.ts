@@ -327,7 +327,13 @@ export function defaultContentFor(siteType: SiteType, title = ""): SiteContent {
   return {
     version: 1,
     meta: { title, description: "", lang: "ru" },
-    theme: { preset: siteType === "ton_project" ? "ton" : "light", accent: "#0098ea", background: "" },
+    theme: {
+      preset: siteType === "ton_project" ? "ton" : "light",
+      accent: "#0098ea",
+      background: "",
+      background_image: "",
+      background_dim: 0,
+    },
     blocks: template.blocks.map((type) => createBlock(type, type === "hero" ? title : "")),
   };
 }

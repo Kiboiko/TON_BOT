@@ -799,6 +799,24 @@ select {
   }
 }
 
+/* --- фон-фотография сайта --- */
+.bg-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.bg-preview img {
+  width: 96px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.range {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
 @media (min-width: 768px) {
   .page {
     padding: 24px;

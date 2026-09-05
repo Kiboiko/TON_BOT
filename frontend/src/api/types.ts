@@ -76,7 +76,16 @@ export type ThemePreset = "light" | "dark" | "aurora" | "sunrise" | "mint" | "to
 export interface SiteContent {
   version: number;
   meta: { title?: string; description?: string; lang?: Language };
-  theme: { preset: ThemePreset; accent: string; background?: string };
+  theme: {
+    preset: ThemePreset;
+    accent: string;
+    /** свой CSS-фон: цвет или градиент */
+    background?: string;
+    /** ссылка на загруженную фотографию фона */
+    background_image?: string;
+    /** затемнение фотографии, 0–90 % — чтобы текст читался */
+    background_dim?: number;
+  };
   blocks: Block[];
 }
 

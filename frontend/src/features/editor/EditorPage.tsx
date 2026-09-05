@@ -17,7 +17,7 @@ import {
 import { useAppStore } from "../../store/app";
 import { useEditorStore } from "../../store/editor";
 import { haptic, showBackButton } from "../../telegram/webapp";
-import { BlockEditor } from "./BlockEditor";
+import { BlockEditor, ImageUpload } from "./BlockEditor";
 import { renderSite } from "../preview/render";
 
 type Tab = "blocks" | "design";
@@ -259,6 +259,56 @@ export function EditorPage() {
               />
             ))}
           </div>
+
+          <div className="field-label">{t("editor.backgroundPhoto")}</div>
+          {content.theme.background_image ? (
+            <>
+              <div className="bg-preview">
+                <img src={content.theme.background_image} alt="" />
+                <Button
+                  size="sm"
+                  variant="danger"
+                  onClick={() =>
+                    patchContent({
+                      theme: { ...content.theme, background_image: "", background_dim: 0 },
+                    })
+                  }
+                >
+                  {t("editor.removePhoto")}
+                </Button>
+              </div>
+              <Field label={t("editor.backgroundDim")} hint={t("editor.backgroundDimHint")}>
+                <div className="row">
+                  <input
+                    className="range"
+                    type="range"
+                    min={0}
+                    max={90}
+                    step={5}
+                    value={content.theme.background_dim ?? 0}
+                    onChange={(e) =>
+                      patchContent({
+                        theme: { ...content.theme, background_dim: Number(e.target.value) },
+                      })
+                    }
+                  />
+                  <span className="card-sub">{content.theme.background_dim ?? 0}%</span>
+                </div>
+              </Field>
+            </>
+          ) : (
+            <>
+              <div className="card-sub">{t("editor.backgroundPhotoHint")}</div>
+              <ImageUpload
+                onUploaded={(url) =>
+                  // сразу приглушаем фото: без затемнения текст на светлом снимке не читается
+                  patchContent({
+                    theme: { ...content.theme, background_image: url, background_dim: 35 },
+                  })
+                }
+              />
+            </>
+          )}
 
           <Field label={t("editor.background")} hint={t("editor.backgroundHint")}>
             <Input

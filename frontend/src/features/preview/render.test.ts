@@ -1,6 +1,6 @@
 /** Рендер должен обезвреживать пользовательский ввод так же, как backend. */
 import { describe, expect, it } from "vitest";
-import { renderCustomCode, renderSite, safeUrl } from "./render";
+import { clampDim, pageBackground, renderCustomCode, renderSite, safeUrl } from "./render";
 import { TEMPLATES, defaultContentFor } from "../../templates/catalog";
 import type { SiteContent } from "../../api/types";
 
@@ -68,7 +68,31 @@ describe("renderSite", () => {
     expect(html).not.toContain("javascript:");
   });
 
-  it("рендерит все шесть шаблонов", () => {
+  // значения обязаны совпадать с page_background на backend: превью и
+  // опубликованный сайт должны выглядеть одинаково
+  it("кладёт фото фоном поверх пресета и затемняет его", () => {
+    expect(pageBackground({ background_image: "/u/a.jpg", background_dim: 40 }, "#f6f7fb")).toBe(
+      "linear-gradient(rgba(0,0,0,0.40),rgba(0,0,0,0.40)), url('/u/a.jpg') center / cover no-repeat, #f6f7fb",
+    );
+    expect(pageBackground({ background_image: "/u/a.jpg" }, "#f6f7fb")).toBe(
+      "url('/u/a.jpg') center / cover no-repeat, #f6f7fb",
+    );
+  });
+
+  it("не даёт ссылке на фото вырваться из url(...)", () => {
+    for (const bad of ["/u/a.jpg') ;} body{display:none", "javascript:alert(1)", "/u/a b.jpg", "/u/a\".jpg"]) {
+      expect(pageBackground({ background_image: bad }, "#f6f7fb")).toBe("#f6f7fb");
+    }
+  });
+
+  it("ограничивает затемнение диапазоном 0–90", () => {
+    expect(clampDim(200)).toBe(90);
+    expect(clampDim(-5)).toBe(0);
+    expect(clampDim("не число")).toBe(0);
+    expect(clampDim(35)).toBe(35);
+  });
+
+  it("рендерит все шаблоны", () => {
     for (const template of TEMPLATES) {
       const html = renderSite(defaultContentFor(template.type, "Тест"), { title: "Тест" });
       expect(html.startsWith("<!DOCTYPE html>")).toBe(true);

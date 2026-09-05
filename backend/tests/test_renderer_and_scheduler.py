@@ -1,6 +1,7 @@
 """A4/A5: безопасность рендера, проект «Свой код» и планировщик подписок."""
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 from decimal import Decimal
 
@@ -19,7 +20,7 @@ from app.models import (
     utcnow,
 )
 from app.services.dns import build_set_storage_payload
-from app.services.renderer import default_content_for, render_site, safe_url
+from app.services.renderer import clamp_dim, default_content_for, render_site, safe_url
 from app.services.subscriptions import refresh_statuses
 from tests.conftest import headers_for
 
@@ -74,8 +75,56 @@ def test_css_background_injection_is_blocked():
     assert "linear-gradient(#fff, #000)" in ok
 
 
-def test_all_six_templates_render():
-    for site_type in ("visitka", "links", "landing", "portfolio", "events", "ton_project"):
+def background_of(html: str) -> str:
+    """Значение --bg из готовой страницы: проверяем именно фон, а не весь CSS."""
+    match = re.search(r"--bg:(.*?);--surface:", html)
+    assert match, "в странице нет переменной --bg"
+    return match.group(1)
+
+
+def test_background_photo_is_rendered_over_preset():
+    """Фото — слой поверх пресета, а затемнение поверх фото: иначе текст не читается."""
+    bg = background_of(render_site({"theme": {"background_image": "/u/a.jpg", "background_dim": 40}}))
+    assert bg == (
+        "linear-gradient(rgba(0,0,0,0.40),rgba(0,0,0,0.40)), "
+        "url('/u/a.jpg') center / cover no-repeat, "
+        "#f6f7fb"  # пресет остаётся запасным слоем, если картинка не загрузится
+    )
+
+    # без затемнения слоя-градиента быть не должно
+    plain = background_of(render_site({"theme": {"background_image": "/u/a.jpg"}}))
+    assert plain == "url('/u/a.jpg') center / cover no-repeat, #f6f7fb"
+
+
+def test_background_photo_cannot_break_out_of_css():
+    """Ссылка приходит от пользователя: кавычка или скобка закрыли бы url(...)."""
+    for bad in (
+        "/u/a.jpg') ;} body{display:none",
+        'javascript:alert(1)',
+        "/u/a b.jpg",
+        '/u/a".jpg',
+    ):
+        bg = background_of(render_site({"theme": {"background_image": bad}, "blocks": []}))
+        assert bg == "#f6f7fb"
+
+
+def test_background_dim_is_clamped():
+    assert clamp_dim(200) == 90
+    assert clamp_dim(-5) == 0
+    assert clamp_dim("не число") == 0
+    assert clamp_dim(35) == 35
+
+
+def test_all_templates_render():
+    for site_type in (
+        "visitka",
+        "links",
+        "landing",
+        "portfolio",
+        "events",
+        "ton_project",
+        "custom_code",
+    ):
         content = default_content_for(site_type, "Тест")
         html = render_site(content, title="Тест", site_type=site_type)
         assert html.startswith("<!DOCTYPE html>")

@@ -401,7 +401,7 @@ BLOCK_RENDERERS: dict[str, Callable[[dict[str, Any]], Markup]] = {
 
 CSS = """
 *{box-sizing:border-box}
-body{margin:0;padding:0;background:var(--bg);color:var(--text);
+body{margin:0;padding:0;background:var(--bg);color:var(--text);min-height:100vh;
   font-family:var(--font);-webkit-font-smoothing:antialiased;line-height:1.5}
 .page{max-width:640px;margin:0 auto;padding:28px 18px 64px;display:flex;flex-direction:column;gap:18px}
 h1{font-size:28px;margin:0 0 6px;letter-spacing:-.02em}
@@ -547,8 +547,7 @@ def render_site(
 
     preset = THEME_PRESETS.get(str(theme.get("preset") or "light"), THEME_PRESETS["light"])
     accent = safe_color(theme.get("accent"), "#0098ea")
-    background = theme.get("background")
-    bg = background if isinstance(background, str) and _is_safe_css_bg(background) else preset["bg"]
+    bg = page_background(theme, preset)
 
     page_title = str(meta.get("title") or title or domain or "TON Site")
     body = render_blocks(content) + render_custom_code(custom_code)
@@ -568,6 +567,40 @@ def render_site(
         body=body,
         footer=footer,
     )
+
+
+def clamp_dim(value: Any) -> int:
+    """Затемнение фотофона в процентах: за пределами 0..90 смысла нет."""
+    try:
+        dim = int(float(value))
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(dim, 90))
+
+
+def page_background(theme: dict[str, Any], preset: dict[str, str]) -> str:
+    """CSS-фон страницы: пресет, свой CSS или загруженная фотография.
+
+    Фото ложится слоем поверх пресета (он остаётся запасным цветом, если
+    картинка не загрузится), а сверху — затемнение: без него светлый текст
+    на светлой фотографии не читается.
+    """
+    custom = theme.get("background")
+    base = custom if isinstance(custom, str) and _is_safe_css_bg(custom) else preset["bg"]
+
+    image = safe_url(theme.get("background_image"))
+    # кавычки и скобки закрыли бы url(...) и позволили дописать свой CSS
+    if not image or any(ch in image for ch in "'\"()") or any(ch.isspace() for ch in image):
+        return base
+
+    layers = []
+    dim = clamp_dim(theme.get("background_dim"))
+    if dim:
+        shade = f"rgba(0,0,0,{dim / 100:.2f})"
+        layers.append(f"linear-gradient({shade},{shade})")
+    layers.append(f"url('{image}') center / cover no-repeat")
+    layers.append(base)
+    return ", ".join(layers)
 
 
 def _is_safe_css_bg(value: str) -> bool:
@@ -597,7 +630,13 @@ def default_content_for(site_type: str, title: str = "") -> dict[str, Any]:
     return {
         "version": 1,
         "meta": {"title": title, "description": "", "lang": "ru"},
-        "theme": {"preset": "light", "accent": "#0098ea", "background": ""},
+        "theme": {
+            "preset": "light",
+            "accent": "#0098ea",
+            "background": "",
+            "background_image": "",
+            "background_dim": 0,
+        },
         "blocks": blocks,
     }
 

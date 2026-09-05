@@ -82,7 +82,7 @@ function FieldInput({
 }
 
 /** Загрузка картинки с устройства: ссылка подставляется в поле блока. */
-function ImageUpload({ onUploaded }: { onUploaded: (url: string) => void }) {
+export function ImageUpload({ onUploaded }: { onUploaded: (url: string) => void }) {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);

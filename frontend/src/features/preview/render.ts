@@ -273,7 +273,7 @@ const ALIASES: Record<string, string> = { about: "text", advantages: "features",
 const CSS = `
 *{box-sizing:border-box}
 body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:var(--font);
-  -webkit-font-smoothing:antialiased;line-height:1.5}
+  min-height:100vh;-webkit-font-smoothing:antialiased;line-height:1.5}
 .page{max-width:640px;margin:0 auto;padding:28px 18px 64px;display:flex;flex-direction:column;gap:18px}
 h1{font-size:28px;margin:0 0 6px;letter-spacing:-.02em}
 h2{font-size:19px;margin:0 0 12px;letter-spacing:-.01em}
@@ -331,6 +331,40 @@ function isSafeBackground(value: string): boolean {
   return /^[#\w\s(),.%-]+$/.test(value.trim());
 }
 
+/** Затемнение фотофона в процентах: за пределами 0..90 смысла нет. */
+export function clampDim(value: unknown): number {
+  const dim = Math.trunc(Number(value));
+  if (!Number.isFinite(dim)) return 0;
+  return Math.max(0, Math.min(dim, 90));
+}
+
+/**
+ * CSS-фон страницы: пресет, свой CSS или загруженная фотография.
+ * Логика повторяет page_background на backend — превью и публикация
+ * обязаны выглядеть одинаково.
+ */
+export function pageBackground(
+  theme: { background?: string; background_image?: string; background_dim?: number },
+  presetBg: string,
+): string {
+  const custom = theme.background;
+  const base = custom && isSafeBackground(custom) ? custom : presetBg;
+
+  const image = safeUrl(theme.background_image ?? "");
+  // кавычки, скобки и пробелы закрыли бы url(...) и позволили дописать свой CSS
+  if (!image || /['"()\s]/.test(image)) return base;
+
+  const layers: string[] = [];
+  const dim = clampDim(theme.background_dim);
+  if (dim) {
+    const shade = `rgba(0,0,0,${(dim / 100).toFixed(2)})`;
+    layers.push(`linear-gradient(${shade},${shade})`);
+  }
+  layers.push(`url('${image}') center / cover no-repeat`);
+  layers.push(base);
+  return layers.join(", ");
+}
+
 function safeColor(value: unknown, fallback: string): string {
   if (typeof value === "string" && /^(#[0-9a-fA-F]{3,8}|rgba?\([\d\s.,%]+\))$/.test(value.trim())) {
     return value.trim();
@@ -380,8 +414,7 @@ export function renderSite(content: SiteContent | undefined, options: RenderOpti
   const meta = content?.meta ?? {};
   const theme = content?.theme ?? { preset: "light" as ThemePreset, accent: "#0098ea" };
   const preset = THEME_PRESETS[theme.preset] ?? THEME_PRESETS.light;
-  const background =
-    theme.background && isSafeBackground(theme.background) ? theme.background : preset.bg;
+  const background = pageBackground(theme, preset.bg);
 
   let body = renderBlocks(content?.blocks) + renderCustomCode(options.customCode);
   if (!body.trim() && options.emptyHint) {
