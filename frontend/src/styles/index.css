@@ -703,13 +703,13 @@ select {
 }
 
 /* --- тарифы: логотип TON, переключатель срока, компактные карточки --- */
-.ton-amount {
+.gram-amount {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   white-space: nowrap;
 }
-.ton-amount-icon {
+.gram-amount-icon {
   flex: 0 0 auto;
   color: var(--accent);
 }

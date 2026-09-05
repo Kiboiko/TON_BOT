@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { billingApi } from "../../api/endpoints";
 import type { Tariff, TariffDuration } from "../../api/types";
-import { TonAmount } from "../../components/TonIcon";
+import { GramAmount } from "../../components/GramIcon";
 import { Badge, Button, Empty, Loading, Notice } from "../../components/ui";
 import { useAppStore } from "../../store/app";
 import { useTonPayment } from "../payments/useTonPayment";
@@ -120,7 +120,7 @@ export function TariffsPage() {
                 <div className="tariff-price">
                   {option ? (
                     <>
-                      <TonAmount value={option.price_ton} size={15} className="tariff-price-value" />
+                      <GramAmount value={option.price_ton} size={15} className="tariff-price-value" />
                       <div className="tariff-price-note">{t(`tariffs.per.${duration}`)}</div>
                     </>
                   ) : (

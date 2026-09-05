@@ -101,7 +101,7 @@ export const en: Translations = {
     locked: "Available after payment",
     description:
       "Your own HTML, CSS and JavaScript at the end of the page. The code runs sandboxed and cannot affect the rest of the site.",
-    buy: "Buy for {{price}} TON",
+    buy: "Buy for {{price}} Gram",
     paid: "Block is paid",
     html: "HTML",
     css: "CSS",
@@ -155,7 +155,7 @@ export const en: Translations = {
   },
   tariffs: {
     title: "Plans",
-    subtitle: "Paid in TON from your connected wallet",
+    subtitle: "Paid in Gram from your connected wallet",
     sitesLimit_one: "{{count}} site",
     sitesLimit_few: "{{count}} sites",
     sitesLimit_many: "{{count}} sites",
@@ -227,8 +227,8 @@ export const en: Translations = {
       sites: "Sites",
       published: "Published",
       subscriptions: "Active plans",
-      revenue: "Revenue, TON",
-      revenue30: "Last 30 days, TON",
+      revenue: "Revenue, Gram",
+      revenue30: "Last 30 days, Gram",
       payments: "Payments",
     },
     users: {
@@ -258,7 +258,7 @@ export const en: Translations = {
       create: "New plan",
       name: "Name",
       description: "Description",
-      price: "Price, TON",
+      price: "Price, Gram",
       sitesLimit: "Sites limit",
       duration: "Duration",
       kind: "Kind",

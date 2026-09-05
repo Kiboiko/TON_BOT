@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { billingApi } from "../../api/endpoints";
 import type { Subscription, SubscriptionStatus } from "../../api/types";
-import { TonIcon } from "../../components/TonIcon";
+import { GramIcon } from "../../components/GramIcon";
 import { Badge, Button, Empty, Loading, Notice } from "../../components/ui";
 import { useAppStore } from "../../store/app";
 
@@ -58,7 +58,7 @@ export function SubscriptionsPage() {
 
       {subs.length === 0 ? (
         <Empty
-          icon={<TonIcon size={40} />}
+          icon={<GramIcon size={40} />}
           title={t("subscriptions.empty")}
           hint={t("tariffs.subtitle")}
           action={

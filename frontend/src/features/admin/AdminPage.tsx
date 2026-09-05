@@ -16,7 +16,7 @@ import type {
   TariffDuration,
   TariffKind,
 } from "../../api/types";
-import { TonAmount } from "../../components/TonIcon";
+import { GramAmount } from "../../components/GramIcon";
 import {
   Badge,
   Button,
@@ -284,7 +284,9 @@ function UsersTab() {
               <div key={payment.id} className="card">
                 <div className="card-row">
                   <div className="grow">
-                    <div className="card-title">{payment.amount} TON</div>
+                    <div className="card-title">
+                      <GramAmount value={payment.amount} size={14} />
+                    </div>
                     <div className="card-sub">
                       {payment.purpose} · {new Date(payment.created_at).toLocaleDateString()}
                     </div>
@@ -436,7 +438,7 @@ function TariffsTab() {
               <div className="grow">
                 <div className="card-title">{tariff.name}</div>
                 <div className="card-sub row" style={{ gap: 5 }}>
-                  <TonAmount value={tariff.price_ton} size={13} /> ·{" "}
+                  <GramAmount value={tariff.price_ton} size={13} /> ·{" "}
                   {t(`tariffs.duration.${tariff.duration}`)} · {tariff.sites_limit}
                 </div>
               </div>

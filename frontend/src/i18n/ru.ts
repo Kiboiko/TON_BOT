@@ -100,7 +100,7 @@ export const ru = {
     locked: "Блок доступен после оплаты",
     description:
       "Свой HTML, CSS и JavaScript в конце страницы. Код выполняется изолированно и не влияет на остальной сайт.",
-    buy: "Купить за {{price}} TON",
+    buy: "Купить за {{price}} Gram",
     paid: "Блок оплачен",
     html: "HTML",
     css: "CSS",
@@ -154,7 +154,7 @@ export const ru = {
   },
   tariffs: {
     title: "Тарифы",
-    subtitle: "Оплата в TON — списывается с подключённого кошелька",
+    subtitle: "Оплата в Gram — списывается с подключённого кошелька",
     sitesLimit_one: "{{count}} сайт",
     sitesLimit_few: "{{count}} сайта",
     sitesLimit_many: "{{count}} сайтов",
@@ -227,8 +227,8 @@ export const ru = {
       sites: "Сайты",
       published: "Опубликовано",
       subscriptions: "Активные подписки",
-      revenue: "Оборот, TON",
-      revenue30: "За 30 дней, TON",
+      revenue: "Оборот, Gram",
+      revenue30: "За 30 дней, Gram",
       payments: "Платежей",
     },
     users: {
@@ -258,7 +258,7 @@ export const ru = {
       create: "Новый тариф",
       name: "Название",
       description: "Описание",
-      price: "Цена, TON",
+      price: "Цена, Gram",
       sitesLimit: "Лимит сайтов",
       duration: "Срок",
       kind: "Тип",
