@@ -163,6 +163,10 @@ select {
   font-size: 19px;
   line-height: 1;
 }
+/* иконка-логотип наследует цвет вкладки, как и эмодзи у соседних */
+.tabbar .tab-icon svg {
+  display: block;
+}
 
 /* --- карточки --- */
 .card {
@@ -352,6 +356,9 @@ select {
 }
 .empty-icon {
   font-size: 40px;
+}
+.empty-icon svg {
+  color: var(--accent);
 }
 
 .spinner {
@@ -693,6 +700,103 @@ select {
   display: flex;
   gap: 8px;
   padding-top: 4px;
+}
+
+/* --- тарифы: логотип TON, переключатель срока, компактные карточки --- */
+.ton-amount {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.ton-amount-icon {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.duration-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.duration-tab {
+  flex: 1 1 auto;
+  border: 0;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.duration-tab.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.tariff-card {
+  padding: 0;
+}
+.tariff {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+}
+.tariff-info {
+  flex: 1;
+  min-width: 0;
+}
+.tariff-name {
+  font-weight: 600;
+  font-size: 15px;
+}
+.tariff-desc {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+.tariff-price {
+  text-align: right;
+  flex: 0 0 auto;
+}
+.tariff-price-value {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.2;
+  justify-content: flex-end;
+}
+.tariff-price-note {
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.3;
+}
+.tariff-buy {
+  flex: 0 0 auto;
+}
+.tariff-save {
+  display: inline-flex;
+  align-items: center;
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--success);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+
+@media (max-width: 360px) {
+  .tariff {
+    gap: 8px;
+    padding: 12px 10px;
+  }
+  .tariff-price-value {
+    font-size: 16px;
+  }
 }
 
 @media (min-width: 768px) {

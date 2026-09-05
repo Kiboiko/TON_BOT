@@ -16,6 +16,7 @@ import type {
   TariffDuration,
   TariffKind,
 } from "../../api/types";
+import { TonAmount } from "../../components/TonIcon";
 import {
   Badge,
   Button,
@@ -434,9 +435,9 @@ function TariffsTab() {
             <div className="card-row">
               <div className="grow">
                 <div className="card-title">{tariff.name}</div>
-                <div className="card-sub">
-                  {tariff.price_ton} TON · {t(`tariffs.duration.${tariff.duration}`)} ·{" "}
-                  {tariff.sites_limit}
+                <div className="card-sub row" style={{ gap: 5 }}>
+                  <TonAmount value={tariff.price_ton} size={13} /> ·{" "}
+                  {t(`tariffs.duration.${tariff.duration}`)} · {tariff.sites_limit}
                 </div>
               </div>
               <Badge kind={tariff.is_active ? "success" : "default"}>

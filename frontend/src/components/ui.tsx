@@ -33,7 +33,7 @@ export function Empty({
   hint,
   action,
 }: {
-  icon?: string;
+  icon?: ReactNode;
   title: string;
   hint?: string;
   action?: ReactNode;

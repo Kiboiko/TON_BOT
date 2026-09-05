@@ -1,8 +1,10 @@
 /** Каркас приложения: авторизация, тема, роутинг, нижняя навигация. */
+import type { ReactNode } from "react";
 import { useEffect } from "react";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { isMockEnabled } from "./api/client";
+import { TonIcon } from "./components/TonIcon";
 import { Button, Loading, Toasts } from "./components/ui";
 import { AdminPage } from "./features/admin/AdminPage";
 import { CustomCodePage } from "./features/editor/CustomCodePage";
@@ -20,9 +22,9 @@ function TabBar() {
   const { t } = useTranslation();
   const isAdmin = useAppStore((s) => s.user?.is_admin ?? false);
 
-  const tabs = [
+  const tabs: { to: string; icon: ReactNode; label: string }[] = [
     { to: "/sites", icon: "🗂", label: t("nav.sites") },
-    { to: "/subscriptions", icon: "💎", label: t("nav.subscriptions") },
+    { to: "/subscriptions", icon: <TonIcon size={19} />, label: t("nav.subscriptions") },
     { to: "/settings", icon: "👤", label: t("nav.settings") },
     ...(isAdmin ? [{ to: "/admin", icon: "🛠", label: t("nav.admin") }] : []),
   ];

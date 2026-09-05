@@ -3,6 +3,10 @@
 Запуск: python -m app.seed
 Идемпотентно: повторный запуск ничего не дублирует и не перетирает цены,
 изменённые через админку.
+
+Тарифная сетка = тариф × срок. Сроки по ТЗ: 1, 3, 6, 12 месяцев и навсегда.
+На витрине срок вынесен в переключатель, поэтому строки с одним и тем же
+именем — это один тариф с разными вариантами оплаты.
 """
 from __future__ import annotations
 
@@ -19,55 +23,126 @@ from app.models import Tariff, TariffDuration, TariffKind, User
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 log = logging.getLogger("seed")
 
-DEFAULT_TARIFFS = [
+# Цены за срок, TON. Чем длиннее срок, тем дешевле месяц:
+# 3 месяца ≈ −10%, 6 месяцев ≈ −17%, год ≈ −30%.
+TIERS: list[dict] = [
     {
-        "name": "Базовый",
-        "description": "1 сайт, публикация на домене .ton",
+        "name": "Basic",
+        "description": "Для одного проекта",
         "sites_limit": 1,
-        "duration": TariffDuration.month,
-        "price_ton": Decimal("2"),
         "kind": TariffKind.base,
+        "prices": {
+            TariffDuration.month: "2",
+            TariffDuration.month3: "5",
+            TariffDuration.month6: "10",
+            TariffDuration.month12: "17",
+            TariffDuration.forever: "50",
+        },
     },
     {
-        "name": "PRO 5",
-        "description": "До 5 сайтов",
+        "name": "Pro",
+        "description": "Для нескольких проектов",
         "sites_limit": 5,
-        "duration": TariffDuration.month,
-        "price_ton": Decimal("7"),
         "kind": TariffKind.pro,
+        "prices": {
+            TariffDuration.month: "7",
+            TariffDuration.month3: "19",
+            TariffDuration.month6: "35",
+            TariffDuration.month12: "60",
+            TariffDuration.forever: "175",
+        },
     },
     {
-        "name": "PRO 25",
-        "description": "До 25 сайтов",
+        "name": "Business",
+        "description": "Для агентства и команды",
         "sites_limit": 25,
-        "duration": TariffDuration.month,
-        "price_ton": Decimal("25"),
         "kind": TariffKind.pro,
+        "prices": {
+            TariffDuration.month: "25",
+            TariffDuration.month3: "67",
+            TariffDuration.month6: "125",
+            TariffDuration.month12: "210",
+            TariffDuration.forever: "600",
+        },
     },
     {
-        "name": "PRO 5 — год",
-        "description": "До 5 сайтов, оплата за 12 месяцев",
-        "sites_limit": 5,
-        "duration": TariffDuration.month12,
-        "price_ton": Decimal("60"),
+        "name": "Max",
+        "description": "Максимальный лимит сайтов",
+        "sites_limit": 100,
         "kind": TariffKind.pro,
-    },
-    {
-        "name": "Свой код",
-        "description": "Премиум-блок HTML/CSS/JS для одного сайта, бессрочно",
-        "sites_limit": 1,
-        "duration": TariffDuration.forever,
-        "price_ton": Decimal("5"),
-        "kind": TariffKind.custom_code,
+        "prices": {
+            TariffDuration.month: "60",
+            TariffDuration.month3: "160",
+            TariffDuration.month6: "300",
+            TariffDuration.month12: "500",
+            TariffDuration.forever: "1500",
+        },
     },
 ]
+
+# Премиум-блок покупается отдельно и на витрину тарифов не попадает.
+CUSTOM_CODE_TARIFF = {
+    "name": "Свой код",
+    "description": "Премиум-блок HTML/CSS/JS для одного сайта, бессрочно",
+    "sites_limit": 1,
+    "duration": TariffDuration.forever,
+    "price_ton": Decimal("5"),
+    "kind": TariffKind.custom_code,
+}
+
+# Старые названия тарифов до перехода на сетку Basic/Pro/Business/Max.
+# Переименовываем, а не пересоздаём: на эти строки ссылаются оплаченные подписки.
+LEGACY_RENAMES: dict[str, str] = {
+    "Базовый": "Basic",
+    "PRO 5": "Pro",
+    "PRO 5 — год": "Pro",
+    "PRO 25": "Business",
+}
+
+
+def default_tariffs() -> list[dict]:
+    """Разворачивает сетку тариф × срок в плоский список строк таблицы."""
+    rows: list[dict] = []
+    for tier in TIERS:
+        for duration, price in tier["prices"].items():
+            rows.append(
+                {
+                    "name": tier["name"],
+                    "description": tier["description"],
+                    "sites_limit": tier["sites_limit"],
+                    "kind": tier["kind"],
+                    "duration": duration,
+                    "price_ton": Decimal(price),
+                }
+            )
+    rows.append(dict(CUSTOM_CODE_TARIFF))
+    return rows
 
 
 async def seed() -> None:
     async with SessionLocal() as session:
+        descriptions = {tier["name"]: tier["description"] for tier in TIERS}
+
+        # 1. Переименование старых тарифов: подписки и платежи остаются привязанными.
+        renamed = 0
+        for old_name, new_name in LEGACY_RENAMES.items():
+            rows = await session.scalars(select(Tariff).where(Tariff.name == old_name))
+            for tariff in rows.all():
+                tariff.name = new_name
+                tariff.description = descriptions.get(new_name, tariff.description)
+                renamed += 1
+
+        await session.flush()
+
+        # 2. Досоздание недостающих вариантов. Ключ — пара «название + срок»,
+        #    иначе сроки одного тарифа считались бы дубликатами.
         created = 0
-        for data in DEFAULT_TARIFFS:
-            exists = await session.scalar(select(Tariff).where(Tariff.name == data["name"]))
+        for data in default_tariffs():
+            exists = await session.scalar(
+                select(Tariff).where(
+                    Tariff.name == data["name"], Tariff.duration == data["duration"]
+                )
+            )
             if exists is not None:
                 continue
             session.add(Tariff(**data))
@@ -81,7 +156,9 @@ async def seed() -> None:
                 promoted += 1
 
         await session.commit()
-        log.info("tariffs created: %s, admins promoted: %s", created, promoted)
+        log.info(
+            "tariffs renamed: %s, created: %s, admins promoted: %s", renamed, created, promoted
+        )
 
 
 def main() -> None:

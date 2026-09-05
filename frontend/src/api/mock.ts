@@ -17,11 +17,14 @@ import type {
   SiteType,
   Subscription,
   Tariff,
+  TariffDuration,
+  TariffKind,
   TonConnectTransaction,
   User,
 } from "./types";
 
-const STORAGE_KEY = "tsb-mock-state-v1";
+// v2: демо-состояние со старой тарифной сеткой сбрасываем
+const STORAGE_KEY = "tsb-mock-state-v2";
 
 interface MockState {
   user: User;
@@ -52,48 +55,36 @@ function seed(): MockState {
     is_admin: true,
     created_at: now(),
   };
-  const tariffs: Tariff[] = [
-    {
-      id: uuid(),
-      name: "Базовый",
-      description: "1 сайт, публикация на домене .ton",
-      sites_limit: 1,
-      duration: "month",
-      price_ton: "2",
-      kind: "base",
-      is_active: true,
-    },
-    {
-      id: uuid(),
-      name: "PRO 5",
-      description: "До 5 сайтов",
-      sites_limit: 5,
-      duration: "month",
-      price_ton: "7",
-      kind: "pro",
-      is_active: true,
-    },
-    {
-      id: uuid(),
-      name: "PRO 25",
-      description: "До 25 сайтов",
-      sites_limit: 25,
-      duration: "month",
-      price_ton: "25",
-      kind: "pro",
-      is_active: true,
-    },
-    {
-      id: uuid(),
-      name: "Свой код",
-      description: "Премиум-блок HTML/CSS/JS",
-      sites_limit: 1,
-      duration: "forever",
-      price_ton: "5",
-      kind: "custom_code",
-      is_active: true,
-    },
+  // Та же сетка «тариф × срок», что и в seed бэкенда: 1, 3, 6, 12 месяцев и навсегда.
+  const TIERS: { name: string; description: string; sites: number; kind: TariffKind; prices: string[] }[] = [
+    { name: "Basic", description: "Для одного проекта", sites: 1, kind: "base", prices: ["2", "5", "10", "17", "50"] },
+    { name: "Pro", description: "Для нескольких проектов", sites: 5, kind: "pro", prices: ["7", "19", "35", "60", "175"] },
+    { name: "Business", description: "Для агентства и команды", sites: 25, kind: "pro", prices: ["25", "67", "125", "210", "600"] },
+    { name: "Max", description: "Максимальный лимит сайтов", sites: 100, kind: "pro", prices: ["60", "160", "300", "500", "1500"] },
   ];
+  const DURATIONS: TariffDuration[] = ["month", "3month", "6month", "12month", "forever"];
+  const tariffs: Tariff[] = TIERS.flatMap((tier) =>
+    DURATIONS.map((duration, i) => ({
+      id: uuid(),
+      name: tier.name,
+      description: tier.description,
+      sites_limit: tier.sites,
+      duration,
+      price_ton: tier.prices[i],
+      kind: tier.kind,
+      is_active: true,
+    })),
+  );
+  tariffs.push({
+    id: uuid(),
+    name: "Свой код",
+    description: "Премиум-блок HTML/CSS/JS",
+    sites_limit: 1,
+    duration: "forever",
+    price_ton: "5",
+    kind: "custom_code",
+    is_active: true,
+  });
   return {
     user,
     sites: [],

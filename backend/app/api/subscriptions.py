@@ -33,7 +33,8 @@ async def list_tariffs(session: SessionDep, _: CurrentUser) -> list[TariffOut]:
     rows = await session.scalars(
         select(Tariff)
         .where(Tariff.is_active.is_(True), Tariff.kind != TariffKind.custom_code)
-        .order_by(Tariff.price_ton.asc())
+        # сначала младшие тарифы, внутри тарифа — от короткого срока к длинному
+        .order_by(Tariff.sites_limit.asc(), Tariff.price_ton.asc())
     )
     return [TariffOut.model_validate(t) for t in rows.all()]
 
