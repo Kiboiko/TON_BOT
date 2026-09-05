@@ -64,6 +64,8 @@ DEFAULT_BLOCKS: dict[str, list[str]] = {
     "portfolio": ["hero", "text", "gallery", "contacts"],
     "events": ["hero", "event_info", "schedule", "cta", "contacts"],
     "ton_project": ["hero", "text", "ton_info", "jetton", "links", "socials"],
+    # «Свой код» — страница целиком из HTML/CSS/JS пользователя, блоков нет
+    "custom_code": [],
 }
 
 

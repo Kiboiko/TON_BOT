@@ -242,9 +242,11 @@ export interface TemplateSpec {
   title: { ru: string; en: string };
   description: { ru: string; en: string };
   blocks: BlockType[];
+  /** Тип проекта, который открывает только подписка. */
+  subscriptionOnly?: boolean;
 }
 
-/** Шесть типов шаблонов из ТЗ (B3). Набор блоков совпадает с backend. */
+/** Шесть шаблонов из ТЗ плюс «Свой код». Набор блоков совпадает с backend. */
 export const TEMPLATES: TemplateSpec[] = [
   {
     type: "visitka",
@@ -287,6 +289,18 @@ export const TEMPLATES: TemplateSpec[] = [
     title: { ru: "TON-проект", en: "TON project" },
     description: { ru: "Тикер, контракт, jetton, ссылки", en: "Ticker, contract, jetton, links" },
     blocks: ["hero", "text", "ton_info", "jetton", "links", "socials"],
+  },
+  {
+    // страница целиком из своего кода: блоков нет, редактируется на отдельном экране
+    type: "custom_code",
+    icon: "⌨️",
+    title: { ru: "Свой код", en: "Custom code" },
+    description: {
+      ru: "Страница целиком на своём HTML, CSS и JS",
+      en: "A whole page of your own HTML, CSS and JS",
+    },
+    blocks: [],
+    subscriptionOnly: true,
   },
 ];
 

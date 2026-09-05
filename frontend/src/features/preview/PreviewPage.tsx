@@ -36,7 +36,7 @@ export function PreviewPage() {
       renderSite(loaded.content_json, {
         title: loaded.title,
         domain: loaded.domain,
-        customCode: loaded.custom_code_paid ? loaded.custom_code : null,
+        customCode: loaded.custom_code,
       }),
     );
   }, []);

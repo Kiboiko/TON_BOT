@@ -48,6 +48,7 @@ export const en: Translations = {
     open: "Open",
     deleteConfirm: "Delete site “{{title}}”? This cannot be undone.",
     limitReached: "You reached the sites limit of your plan",
+    subscriptionOnly: "Plan only",
     upgrade: "Choose a plan",
     status: {
       draft: "Draft",
@@ -84,7 +85,6 @@ export const en: Translations = {
     itemNumber: "{{label}} {{number}}",
     imageHint: "Paste an image URL",
     uploadImage: "Upload photo",
-    customCode: "Custom code",
   },
   preview: {
     title: "Preview",
@@ -97,19 +97,16 @@ export const en: Translations = {
     emptySite: "Add blocks in the builder — your site will appear here",
   },
   customCode: {
-    title: "Custom code block",
-    locked: "Available after payment",
+    title: "Custom code",
+    locked: "An active plan is required",
     description:
-      "Your own HTML, CSS and JavaScript at the end of the page. The code runs sandboxed and cannot affect the rest of the site.",
-    buy: "Buy for {{price}} Gram",
-    paid: "Block is paid",
+      "The whole page is built from your own HTML, CSS and JavaScript — no builder blocks here.",
+    subscriptionHint: "The custom code project is included in any active plan.",
     html: "HTML",
     css: "CSS",
     js: "JavaScript",
     save: "Save code",
-    warning:
-      "The code is embedded as is. Check it — a JS error breaks only this block, not the whole site.",
-    notConfigured: "The admin has not configured the custom code plan yet",
+    warning: "The code goes onto the page as is. Check it — a JS error breaks the whole page.",
   },
   domain: {
     title: "Domain",
@@ -287,7 +284,7 @@ export const en: Translations = {
   errors: {
     LIMIT_EXCEEDED: "You reached the sites limit of your plan",
     SUBSCRIPTION_REQUIRED: "An active plan is required",
-    CUSTOM_CODE_NOT_PAID: "The custom code block is not paid",
+    NOT_A_CUSTOM_CODE_SITE: "Custom code is only available in a project of that type",
     WALLET_NOT_CONNECTED: "Connect your TON wallet",
     PAYMENT_NOT_CONFIRMED: "Payment is not on-chain yet. Wait a moment and retry",
     TX_ALREADY_USED: "This transaction is already used",

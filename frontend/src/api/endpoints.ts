@@ -57,13 +57,7 @@ export const sitesApi = {
   publishStatus: (id: string) => api.get<PublishStatus>(`/sites/${id}/publish-status`),
   dnsBind: (id: string) => api.post<{ transaction: TonConnectTransaction }>(`/sites/${id}/dns-bind`),
 
-  // премиум-блок «Свой код»
-  customCodePurchase: (id: string) =>
-    api.post<{ transaction: TonConnectTransaction; payment_id: string }>(
-      `/sites/${id}/custom-code/purchase`,
-    ),
-  customCodeConfirm: (id: string, body: { payment_id: string; tx_hash: string }) =>
-    api.post<{ success: boolean }>(`/sites/${id}/custom-code/confirm`, body),
+  // проект типа «Свой код»: код доступен по подписке
   setCustomCode: (id: string, body: CustomCode) =>
     api.post<{ success: boolean }>(`/sites/${id}/custom-code`, body),
 };

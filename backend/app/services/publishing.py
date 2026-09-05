@@ -41,7 +41,7 @@ def build_site_html(site: Site) -> str:
     return render_site(
         site.content_json,
         title=site.title,
-        custom_code=site.custom_code if site.custom_code_paid else None,
+        custom_code=site.custom_code,
         domain=site.domain,
         site_type=site.type.value,
     )

@@ -116,13 +116,18 @@ payload → передаёт его в TON Connect как `tonProof` → при�
 `price_ton` — строка без хвостовых нулей (`"9.5"`), чтобы не терять точность
 в JS. `transaction` передаётся в TON Connect как есть.
 
-### Премиум-блок «Свой код»
+### Проект «Свой код»
+
+Отдельный тип сайта (`type: "custom_code"`), а не блок внутри другого проекта.
+Создание такого сайта и загрузка кода требуют активной подписки — пробного
+периода недостаточно.
 
 | Метод | Путь | Ответ |
 |---|---|---|
-| POST | `/api/sites/{id}/custom-code/purchase` | `{ transaction, payment_id }` |
-| POST | `/api/sites/{id}/custom-code/confirm` | `{ success }` — **дополнение**: подтверждение оплаты |
 | POST | `/api/sites/{id}/custom-code` | `{ success }` |
+
+Ошибки: `402 SUBSCRIPTION_REQUIRED` — нет подписки; `400 NOT_A_CUSTOM_CODE_SITE` —
+сайт другого типа; `400 CUSTOM_CODE_TOO_LARGE` — превышен лимит размера.
 
 ### Админка
 
@@ -155,8 +160,6 @@ payload → передаёт его в TON Connect как `tonProof` → при�
 небезопасной или незавершённой:
 
 1. `GET /api/user/ton-proof-payload` — одноразовый nonce для ton_proof.
-2. `POST /api/sites/{id}/custom-code/confirm` — подтверждение оплаты премиум-блока
-   (в ТЗ описана покупка и загрузка, но не шаг подтверждения).
 3. `POST /api/sites/{id}/dns-bind` — транзакция привязки опубликованного контента
    к домену (её подписывает владелец домена, backend лишь собирает тело).
 4. `POST /api/uploads` и `GET /u/{имя}` — загрузка изображений из ТЗ (пункт B2)

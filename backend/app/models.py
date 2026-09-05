@@ -54,6 +54,8 @@ class SiteType(str, enum.Enum):
     portfolio = "portfolio"
     events = "events"
     ton_project = "ton_project"
+    # отдельный тип проекта: страница целиком из своего HTML/CSS/JS, блоков нет
+    custom_code = "custom_code"
 
 
 class SiteStatus(str, enum.Enum):
@@ -146,8 +148,8 @@ class Site(Base):
     type: Mapped[SiteType] = mapped_column(SAEnum(SiteType, name="site_type_enum"), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     content_json: Mapped[dict] = mapped_column(JSONType, default=dict, nullable=False)
+    # заполняется только у сайтов типа custom_code; доступ даёт подписка
     custom_code: Mapped[dict | None] = mapped_column(JSONType)
-    custom_code_paid: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     domain: Mapped[str | None] = mapped_column(String(255), index=True)
     tld: Mapped[str | None] = mapped_column(String(32))
     dns_item_address: Mapped[str | None] = mapped_column(String(128))

@@ -80,16 +80,6 @@ TIERS: list[dict] = [
     },
 ]
 
-# Премиум-блок покупается отдельно и на витрину тарифов не попадает.
-CUSTOM_CODE_TARIFF = {
-    "name": "Свой код",
-    "description": "Премиум-блок HTML/CSS/JS для одного сайта, бессрочно",
-    "sites_limit": 1,
-    "duration": TariffDuration.forever,
-    "price_ton": Decimal("5"),
-    "kind": TariffKind.custom_code,
-}
-
 # Старые названия тарифов до перехода на сетку Basic/Pro/Business/Max.
 # Переименовываем, а не пересоздаём: на эти строки ссылаются оплаченные подписки.
 LEGACY_RENAMES: dict[str, str] = {
@@ -115,7 +105,6 @@ def default_tariffs() -> list[dict]:
                     "price_ton": Decimal(price),
                 }
             )
-    rows.append(dict(CUSTOM_CODE_TARIFF))
     return rows
 
 
@@ -132,9 +121,21 @@ async def seed() -> None:
                 tariff.description = descriptions.get(new_name, tariff.description)
                 renamed += 1
 
+        # 2. Отключение тарифа на разовую покупку блока «Свой код».
+        #    Удалять нельзя: на строку могут ссылаться старые платежи.
+        disabled = 0
+        legacy = await session.scalars(
+            select(Tariff).where(
+                Tariff.kind == TariffKind.custom_code, Tariff.is_active.is_(True)
+            )
+        )
+        for tariff in legacy.all():
+            tariff.is_active = False
+            disabled += 1
+
         await session.flush()
 
-        # 2. Досоздание недостающих вариантов. Ключ — пара «название + срок»,
+        # 3. Досоздание недостающих вариантов. Ключ — пара «название + срок»,
         #    иначе сроки одного тарифа считались бы дубликатами.
         created = 0
         for data in default_tariffs():
@@ -157,7 +158,11 @@ async def seed() -> None:
 
         await session.commit()
         log.info(
-            "tariffs renamed: %s, created: %s, admins promoted: %s", renamed, created, promoted
+            "tariffs renamed: %s, disabled: %s, created: %s, admins promoted: %s",
+            renamed,
+            disabled,
+            created,
+            promoted,
         )
 
 

@@ -37,7 +37,7 @@ import { showConfirm } from "../../telegram/webapp";
 type Tab = "stats" | "users" | "tariffs" | "domains" | "zone";
 
 const DURATIONS: TariffDuration[] = ["month", "3month", "6month", "12month", "forever"];
-const KINDS: TariffKind[] = ["base", "pro", "custom_code"];
+const KINDS: TariffKind[] = ["base", "pro"];
 
 export function AdminPage() {
   const { t } = useTranslation();

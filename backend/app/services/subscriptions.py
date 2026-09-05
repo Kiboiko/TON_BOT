@@ -109,6 +109,24 @@ async def has_publish_right(session: AsyncSession, user: User, site: Site) -> bo
     return False
 
 
+async def has_custom_code_right(session: AsyncSession, user: User) -> bool:
+    """Тип проекта «Свой код» открывает только подписка.
+
+    Пробного периода недостаточно: триал — это бесплатная публикация первого
+    сайта, а не доступ к платным возможностям.
+    """
+    return any(not sub.is_trial for sub in await active_subscriptions(session, user.id))
+
+
+async def ensure_custom_code_right(session: AsyncSession, user: User) -> None:
+    if not await has_custom_code_right(session, user):
+        raise LimitExceeded(
+            "An active subscription is required for the custom code project",
+            code="SUBSCRIPTION_REQUIRED",
+            status_code=402,
+        )
+
+
 async def grant_trial_if_first_publish(
     session: AsyncSession, user: User, site: Site
 ) -> Subscription | None:

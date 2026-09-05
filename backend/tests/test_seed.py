@@ -27,7 +27,7 @@ def test_every_tier_has_all_durations_from_tz() -> None:
         durations = {r["duration"] for r in rows if r["name"] == tier["name"]}
         assert durations == ALL_DURATIONS, tier["name"]
 
-    assert len(rows) == len(TIERS) * len(ALL_DURATIONS) + 1  # + «Свой код»
+    assert len(rows) == len(TIERS) * len(ALL_DURATIONS)
 
 
 def test_longer_terms_are_cheaper_per_month() -> None:

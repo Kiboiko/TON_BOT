@@ -26,7 +26,6 @@ export class ApiError extends Error {
   get isPaymentRelated(): boolean {
     return (
       this.code === "SUBSCRIPTION_REQUIRED" ||
-      this.code === "CUSTOM_CODE_NOT_PAID" ||
       this.code === "LIMIT_EXCEEDED" ||
       this.status === 402
     );

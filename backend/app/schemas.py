@@ -118,7 +118,6 @@ class SiteOut(ORMModel):
     title: str
     content_json: dict[str, Any]
     custom_code: dict[str, Any] | None = None
-    custom_code_paid: bool = False
     domain: str | None = None
     dns_item_address: str | None = None
     collection_address: str | None = None

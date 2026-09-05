@@ -1,4 +1,4 @@
-"""Эндпоинты конструктора сайтов, превью, публикации и премиум-блока «Свой код»."""
+"""Эндпоинты конструктора сайтов, превью, публикации и проектов «Свой код»."""
 from __future__ import annotations
 
 import uuid
@@ -9,23 +9,19 @@ from sqlalchemy import select
 
 from app.api.deps import CurrentUser, SessionDep
 from app.core.config import settings
-from app.core.errors import BadRequest, Conflict, NotFound, PaymentRequired
+from app.core.errors import BadRequest, Conflict, NotFound
 from app.models import (
-    PaymentPurpose,
     Site,
     SiteStatus,
-    Tariff,
-    TariffKind,
+    SiteType,
     utcnow,
 )
 from app.schemas import (
-    ConfirmPaymentRequest,
     CustomCodeRequest,
     DnsBindResponse,
     PreviewResponse,
     PublishResponse,
     PublishStatusResponse,
-    PurchaseResponse,
     SiteCreateRequest,
     SiteListItem,
     SiteResponse,
@@ -33,7 +29,6 @@ from app.schemas import (
     SuccessResponse,
     TonConnectTransaction,
 )
-from app.services import payments as payments_service
 from app.services import subscriptions as subs_service
 from app.api.public import public_site_url
 from app.services.dns import build_set_storage_transaction
@@ -48,6 +43,15 @@ async def _get_site(session: SessionDep, site_id: uuid.UUID, user) -> Site:
     if site is None or site.user_id != user.id:
         raise NotFound("Site not found", code="SITE_NOT_FOUND")
     return site
+
+
+def _ensure_custom_code_site(site: Site) -> None:
+    """Свой код живёт только в проекте соответствующего типа, а не внутри визитки."""
+    if site.type is not SiteType.custom_code:
+        raise BadRequest(
+            "Custom code is only available for sites of type custom_code",
+            code="NOT_A_CUSTOM_CODE_SITE",
+        )
 
 
 def _check_content_size(content: dict | None) -> None:
@@ -70,6 +74,8 @@ async def list_sites(session: SessionDep, user: CurrentUser) -> list[SiteListIte
 async def create_site(
     session: SessionDep, user: CurrentUser, body: SiteCreateRequest
 ) -> SiteResponse:
+    if body.type is SiteType.custom_code:
+        await subs_service.ensure_custom_code_right(session, user)
     await subs_service.ensure_can_create_site(session, user)
     _check_content_size(body.content_json)
 
@@ -96,10 +102,8 @@ async def update_site(
         _check_content_size(body.content_json)
         site.content_json = body.content_json
     if body.custom_code is not None:
-        if not site.custom_code_paid:
-            raise PaymentRequired(
-                "Custom code block is not paid for this site", code="CUSTOM_CODE_NOT_PAID"
-            )
+        _ensure_custom_code_site(site)
+        await subs_service.ensure_custom_code_right(session, user)
         site.custom_code = body.custom_code.model_dump()
     site.updated_at = utcnow()
     await session.flush()
@@ -125,7 +129,7 @@ async def preview_site(
     html = render_site(
         site.content_json,
         title=site.title,
-        custom_code=site.custom_code if site.custom_code_paid else None,
+        custom_code=site.custom_code,
         domain=site.domain,
         site_type=site.type.value,
     )
@@ -179,63 +183,15 @@ async def render_published(
     return HTMLResponse(build_site_html(site))
 
 
-# ------------------------------------------------- премиум-блок «Свой код»
-@router.post("/{site_id}/custom-code/purchase", response_model=PurchaseResponse)
-async def purchase_custom_code(
-    session: SessionDep, user: CurrentUser, site_id: uuid.UUID
-) -> PurchaseResponse:
-    """Оплата премиум-блока: цена берётся из активного тарифа kind=custom_code (админка)."""
-    site = await _get_site(session, site_id, user)
-    if site.custom_code_paid:
-        raise Conflict("Custom code is already paid for this site", code="CUSTOM_CODE_PAID")
-
-    tariff = await session.scalar(
-        select(Tariff)
-        .where(Tariff.kind == TariffKind.custom_code, Tariff.is_active.is_(True))
-        .order_by(Tariff.price_ton.asc())
-    )
-    if tariff is None:
-        raise NotFound("Custom code tariff is not configured", code="TARIFF_NOT_FOUND")
-
-    payment = await payments_service.create_payment(
-        session,
-        user=user,
-        amount=tariff.price_ton,
-        purpose=PaymentPurpose.custom_code,
-        related_id=site.id,
-    )
-    tx = payments_service.build_payment_transaction(payment)
-    return PurchaseResponse(
-        transaction=TonConnectTransaction(**tx.to_tonconnect()), payment_id=payment.id
-    )
-
-
-@router.post("/{site_id}/custom-code/confirm", response_model=SuccessResponse)
-async def confirm_custom_code(
-    session: SessionDep, user: CurrentUser, site_id: uuid.UUID, body: ConfirmPaymentRequest
-) -> SuccessResponse:
-    """Подтверждение оплаты премиум-блока — только после проверки транзакции on-chain."""
-    site = await _get_site(session, site_id, user)
-    payment = await payments_service.get_payment_for_user(session, body.payment_id, user)
-    if payment.purpose != PaymentPurpose.custom_code or payment.related_id != site.id:
-        raise BadRequest("Payment does not belong to this site", code="PAYMENT_MISMATCH")
-
-    await payments_service.confirm_payment(session, payment, body.tx_hash)
-    site.custom_code_paid = True
-    await session.flush()
-    return SuccessResponse()
-
-
+# ------------------------------------------------- проект «Свой код»
 @router.post("/{site_id}/custom-code", response_model=SuccessResponse)
 async def set_custom_code(
     session: SessionDep, user: CurrentUser, site_id: uuid.UUID, body: CustomCodeRequest
 ) -> SuccessResponse:
-    """Загрузка HTML/CSS/JS. Доступна только после подтверждённой оплаты."""
+    """Загрузка HTML/CSS/JS в проект типа «Свой код». Нужна активная подписка."""
     site = await _get_site(session, site_id, user)
-    if not site.custom_code_paid:
-        raise PaymentRequired(
-            "Custom code block is not paid for this site", code="CUSTOM_CODE_NOT_PAID"
-        )
+    _ensure_custom_code_site(site)
+    await subs_service.ensure_custom_code_right(session, user)
 
     total = len(body.html.encode()) + len(body.css.encode()) + len(body.js.encode())
     if total > settings.MAX_CUSTOM_CODE_BYTES:

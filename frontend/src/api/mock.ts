@@ -133,11 +133,19 @@ function fail(status: number, code: string, message: string): never {
   throw new ApiError(status, { code, message });
 }
 
-function sitesLimit(): number {
-  const active = state.subscriptions.filter(
+function activeSubscriptions(state: MockState) {
+  return state.subscriptions.filter(
     (s) => s.status !== "expired" && (!s.expires_at || new Date(s.expires_at) > new Date()),
   );
-  return Math.max(1, ...active.map((s) => s.tariff?.sites_limit ?? 1));
+}
+
+function sitesLimit(): number {
+  return Math.max(1, ...activeSubscriptions(state).map((s) => s.tariff?.sites_limit ?? 1));
+}
+
+/** «Свой код» открывает подписка; пробный период — нет, как и на backend. */
+function hasPaidSubscription(state: MockState): boolean {
+  return activeSubscriptions(state).some((s) => !s.is_trial);
 }
 
 function toListItem(site: Site): SiteListItem {
@@ -193,13 +201,15 @@ async function handler(method: Method, path: string, options: RequestOptions): P
       fail(403, "LIMIT_EXCEEDED", `Достигнут лимит сайтов (${sitesLimit()})`);
     }
     const input = body as unknown as { type: SiteType; title: string };
+    if (input.type === "custom_code" && !hasPaidSubscription(state)) {
+      fail(402, "SUBSCRIPTION_REQUIRED", "Нужна активная подписка");
+    }
     const site: Site = {
       id: uuid(),
       type: input.type,
       title: input.title,
       content_json: defaultContentFor(input.type, input.title),
       custom_code: null,
-      custom_code_paid: false,
       domain: null,
       dns_item_address: null,
       collection_address: null,
@@ -235,7 +245,7 @@ async function handler(method: Method, path: string, options: RequestOptions): P
         preview_html: renderSite(site.content_json, {
           title: site.title,
           domain: site.domain,
-          customCode: site.custom_code_paid ? site.custom_code : null,
+          customCode: site.custom_code,
         }),
       };
     }
@@ -261,35 +271,13 @@ async function handler(method: Method, path: string, options: RequestOptions): P
       };
     }
     if (tail === "/dns-bind") return { transaction: fakeTransaction("0.05") };
-    if (tail === "/custom-code/purchase") {
-      const tariff = state.tariffs.find((t) => t.kind === "custom_code");
-      if (!tariff) fail(404, "TARIFF_NOT_FOUND", "Тариф не настроен");
-      const payment: Payment = {
-        id: uuid(),
-        tx_hash: null,
-        amount: tariff.price_ton,
-        purpose: "custom_code",
-        related_id: site.id,
-        status: "pending",
-        created_at: now(),
-        confirmed_at: null,
-      };
-      state.payments.push(payment);
-      save(state);
-      return { transaction: fakeTransaction(tariff.price_ton), payment_id: payment.id };
-    }
-    if (tail === "/custom-code/confirm") {
-      site.custom_code_paid = true;
-      const payment = state.payments.find((p) => p.id === (body as { payment_id: string }).payment_id);
-      if (payment) {
-        payment.status = "confirmed";
-        payment.confirmed_at = now();
-      }
-      save(state);
-      return { success: true };
-    }
     if (tail === "/custom-code") {
-      if (!site.custom_code_paid) fail(402, "CUSTOM_CODE_NOT_PAID", "Блок не оплачен");
+      if (site.type !== "custom_code") {
+        fail(400, "NOT_A_CUSTOM_CODE_SITE", "Свой код доступен только в проекте этого типа");
+      }
+      if (!hasPaidSubscription(state)) {
+        fail(402, "SUBSCRIPTION_REQUIRED", "Нужна активная подписка");
+      }
       site.custom_code = body as unknown as Site["custom_code"];
       save(state);
       return { success: true };

@@ -42,10 +42,14 @@ export function EditorPage() {
     sitesApi
       .get(siteId)
       .then(({ site }) => {
-        if (!cancelled) {
-          editor.load(site);
-          setLoading(false);
+        if (cancelled) return;
+        // «Свой код» — проект без блоков, его редактируют на отдельном экране
+        if (site.type === "custom_code") {
+          navigate(`/sites/${siteId}/custom-code`, { replace: true });
+          return;
         }
+        editor.load(site);
+        setLoading(false);
       })
       .catch((error) => {
         toastError(error);
@@ -71,7 +75,7 @@ export function EditorPage() {
         ? renderSite(content, {
             title: editor.title,
             domain: editor.site?.domain ?? null,
-            customCode: editor.site?.custom_code_paid ? editor.site.custom_code : null,
+            customCode: editor.site?.custom_code ?? null,
             emptyHint: t("preview.emptySite"),
           })
         : "",
@@ -208,10 +212,6 @@ export function EditorPage() {
 
           <Button block onClick={() => setAdding(true)}>
             + {t("editor.addBlock")}
-          </Button>
-
-          <Button block onClick={() => navigate(`/sites/${siteId}/custom-code`)}>
-            ⌨️ {t("editor.customCode")}
           </Button>
         </>
       ) : (

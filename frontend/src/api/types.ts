@@ -12,7 +12,8 @@ export type SiteType =
   | "landing"
   | "portfolio"
   | "events"
-  | "ton_project";
+  | "ton_project"
+  | "custom_code";
 
 export type SiteStatus =
   | "draft"
@@ -85,7 +86,6 @@ export interface Site {
   title: string;
   content_json: SiteContent;
   custom_code: CustomCode | null;
-  custom_code_paid: boolean;
   domain: string | null;
   dns_item_address: string | null;
   collection_address: string | null;
