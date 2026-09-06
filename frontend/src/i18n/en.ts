@@ -297,6 +297,7 @@ export const en: Translations = {
     PAYMENT_NOT_CONFIRMED: "Payment is not on-chain yet. Wait a moment and retry",
     TX_ALREADY_USED: "This transaction is already used",
     DOMAIN_TAKEN: "Domain is already taken",
+    ZONE_NOT_DEPLOYED: "The collection is not deployed yet — sign the zone deploy transaction first",
     NETWORK_ERROR: "No connection to the server",
     INIT_DATA_INVALID: "Telegram authorization error",
   },

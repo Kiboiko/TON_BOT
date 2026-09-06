@@ -133,6 +133,11 @@ export const adminApi = {
   updateZone: (body: Partial<Omit<Zone, "configured" | "deployable">>) =>
     api.patch<Zone>("/admin/zone", body),
   deployZone: () =>
-    api.post<{ transaction: TonConnectTransaction; domain: string }>("/admin/zone/deploy"),
+    api.post<{
+      transaction: TonConnectTransaction;
+      domain: string;
+      // адрес будущей коллекции: подставляется в форму, чтобы не искать его вручную
+      collection_address: string | null;
+    }>("/admin/zone/deploy"),
   stats: () => api.get<AdminStats>("/admin/stats"),
 };

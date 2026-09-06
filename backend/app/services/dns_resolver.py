@@ -38,6 +38,8 @@ def is_valid_name(name: str) -> bool:
 class DomainResolver(Protocol):
     async def resolve(self, domain: str) -> DomainInfo: ...
 
+    async def contract_deployed(self, address: str) -> bool | None: ...
+
     async def close(self) -> None: ...
 
 
@@ -89,6 +91,28 @@ class TonApiResolver:
             expires_at=data.get("expiring_at"),
         )
 
+    async def contract_deployed(self, address: str) -> bool | None:
+        """Есть ли контракт по адресу. None — проверить не удалось.
+
+        Нужна перед включением зоны: адрес коллекции известен заранее (он
+        выводится из транзакции разворота), но пока она не развёрнута, включать
+        зону нельзя — пользователи получили бы субдомены в пустоту.
+        """
+        client = await self._get_client()
+        try:
+            resp = await client.get(f"/v2/accounts/{address}")
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            log.warning("account check %s failed: %s", address, exc)
+            return None
+        if resp.status_code >= 400:
+            log.warning("account check %s -> %s", address, resp.status_code)
+            return None
+        try:
+            status = str(resp.json().get("status") or "")
+        except ValueError:
+            return None
+        return status not in {"nonexist", "uninit"}
+
     async def close(self) -> None:
         if self._client is not None:
             await self._client.aclose()
@@ -104,6 +128,9 @@ class FakeResolver:
         self.calls: list[str] = []
         # домены, «купленные» в тесте: адрес -> владелец
         self.owned: dict[str, str] = {}
+        # контракты: адрес -> есть ли он в сети. По умолчанию считаем, что есть,
+        # а тесты про неразвёрнутую зону выставляют False явно
+        self.deployed: dict[str, bool | None] = {}
 
     def own(self, domain: str, owner: str, item_address: str | None = None) -> None:
         self.owned[domain.strip().lower()] = owner
@@ -129,6 +156,9 @@ class FakeResolver:
             item_address=self.FAKE_ITEM if taken else None,
             owner=self.FAKE_ITEM if taken else None,
         )
+
+    async def contract_deployed(self, address: str) -> bool | None:
+        return self.deployed.get(address, True)
 
     async def close(self) -> None:
         return None

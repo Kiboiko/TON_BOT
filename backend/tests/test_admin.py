@@ -6,7 +6,7 @@ import uuid
 from sqlalchemy import select
 
 from app.core.db import SessionLocal
-from app.models import AdminAction, AdminActionType
+from app.models import AdminAction, AdminActionType, User
 from tests.conftest import headers_for
 
 ADMIN = headers_for(777000, "boss")
@@ -166,3 +166,57 @@ async def test_admin_domains_list(client, domain_service):
 
     domains = await client.get("/api/admin/domains", headers=ADMIN)
     assert any(d["domain"] == "cool.ton" and d["telegram_id"] == 3200 for d in domains.json())
+
+
+async def test_zone_cannot_be_enabled_before_deploy(client, resolver):
+    """Адрес коллекции известен заранее, но включать зону до разворота нельзя.
+
+    Иначе зона выглядела бы рабочей, а субдомены уходили бы в контракт,
+    которого нет в сети.
+    """
+    collection = "0:" + "cc" * 32
+    resolver.deployed[collection] = False
+
+    # домен и его DNS-item сохраняются как обычно
+    setup = await client.patch(
+        "/api/admin/zone",
+        headers=ADMIN,
+        json={"domain": "notdeployed.ton", "dns_item_address": "0:" + "dd" * 32},
+    )
+    assert setup.status_code == 200 and setup.json()["deployable"] is True
+
+    # а вот адрес коллекции, которой ещё нет в сети, принимать нельзя
+    denied = await client.patch(
+        "/api/admin/zone", headers=ADMIN, json={"collection_address": collection}
+    )
+    assert denied.status_code == 400
+    assert denied.json()["error"]["code"] == "ZONE_NOT_DEPLOYED"
+
+    # контракт появился в сети — теперь настройка принимается
+    resolver.deployed[collection] = True
+    ok = await client.patch(
+        "/api/admin/zone", headers=ADMIN, json={"collection_address": collection}
+    )
+    assert ok.status_code == 200 and ok.json()["configured"] is True
+
+
+async def test_zone_deploy_returns_future_collection_address(client, resolver, domain_service):
+    """Разворот отдаёт адрес коллекции, чтобы админу не искать его в эксплорере."""
+    await client.patch(
+        "/api/admin/zone",
+        headers=ADMIN,
+        json={"domain": "fresh.ton", "dns_item_address": "0:" + "ee" * 32},
+    )
+    # кошелёк администратора нужен: он становится владельцем зоны
+    async with SessionLocal() as session:
+        user = await session.scalar(select(User).where(User.telegram_id == 777000))
+        user.wallet_address = "0:" + "ff" * 32
+        await session.commit()
+
+    resp = await client.post("/api/admin/zone/deploy", headers=ADMIN)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["domain"] == "fresh.ton"
+    # заглушка subdom отдаёт транзакцию со state_init — его адрес и есть коллекция
+    tx_addresses = [m["address"] for m in body["transaction"]["messages"] if m.get("stateInit")]
+    assert body["collection_address"] == (tx_addresses[0] if tx_addresses else None)

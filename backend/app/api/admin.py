@@ -52,6 +52,7 @@ from app.schemas import (
 from app.api.deps import require_wallet
 from app.services import notifications
 from app.services import subscriptions as subs_service
+from app.services.dns_resolver import get_resolver
 from app.services.subdom_client import get_domain_service
 from app.services.zone import get_zone, set_zone
 
@@ -357,6 +358,17 @@ async def update_zone(
     session: SessionDep, admin: AdminUser, body: ZoneUpdateRequest
 ) -> ZoneOut:
     """Правка настроек зоны: домен, его DNS-item и адрес коллекции после разворота."""
+    # Адрес коллекции известен ещё до разворота, поэтому его легко вписать рано.
+    # Зона с невыстроенной коллекцией выглядела бы рабочей, а субдомены уходили
+    # бы в никуда — поэтому проверяем, что контракт действительно в сети.
+    if body.collection_address:
+        deployed = await get_resolver().contract_deployed(body.collection_address)
+        if deployed is False:
+            raise BadRequest(
+                "Collection contract is not deployed yet: sign the zone deploy transaction first",
+                code="ZONE_NOT_DEPLOYED",
+            )
+
     zone = await set_zone(
         session,
         domain=body.domain,
@@ -398,8 +410,18 @@ async def deploy_zone(session: SessionDep, admin: AdminUser) -> ZoneDeployRespon
 
     await _audit(session, admin, AdminActionType.deploy_zone, None, zone=zone.domain, mode=zone.mode)
     return ZoneDeployResponse(
-        transaction=TonConnectTransaction(**tx.to_tonconnect()), domain=zone.domain
+        transaction=TonConnectTransaction(**tx.to_tonconnect()),
+        domain=zone.domain,
+        collection_address=_collection_from(tx),
     )
+
+
+def _collection_from(tx) -> str | None:
+    """Адрес коллекции — назначение сообщения, которое разворачивает контракт."""
+    for message in tx.messages:
+        if message.state_init:
+            return message.address
+    return None
 
 
 # --------------------------------------------------------------------- stats

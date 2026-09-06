@@ -298,6 +298,7 @@ export const ru = {
     PAYMENT_NOT_CONFIRMED: "Платёж пока не найден в блокчейне. Подождите и повторите",
     TX_ALREADY_USED: "Эта транзакция уже использована",
     DOMAIN_TAKEN: "Домен уже занят",
+    ZONE_NOT_DEPLOYED: "Коллекция ещё не развёрнута — сначала подпишите транзакцию разворота зоны",
     NETWORK_ERROR: "Нет связи с сервером",
     INIT_DATA_INVALID: "Ошибка авторизации Telegram",
   },

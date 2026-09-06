@@ -240,6 +240,9 @@ class ZoneUpdateRequest(BaseModel):
 class ZoneDeployResponse(BaseModel):
     transaction: TonConnectTransaction
     domain: str
+    # адрес будущей коллекции: он детерминированно выводится из state_init
+    # транзакции, поэтому его не нужно искать в эксплорере после подписи
+    collection_address: str | None = None
 
 
 class DomainConfirmRequest(BaseModel):

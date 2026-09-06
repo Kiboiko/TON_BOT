@@ -567,7 +567,10 @@ function ZoneTab() {
 
   async function deploy(): Promise<void> {
     try {
-      const { transaction } = await adminApi.deployZone();
+      const { transaction, collection_address } = await adminApi.deployZone();
+      // адрес коллекции известен заранее — подставляем его в форму сразу,
+      // чтобы после подписи не искать контракт в эксплорере
+      if (collection_address) setForm((f) => ({ ...f, collection_address }));
       const done = await payment.pay(transaction, async () => ({ ok: true }));
       if (done) toast(t("admin.zone.deployed"), "success");
     } catch (error) {
