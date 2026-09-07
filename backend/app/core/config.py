@@ -96,6 +96,8 @@ class Settings(BaseSettings):
 
     # --- подписки ---
     TRIAL_DAYS: int = 7
+    # через сколько секунд «публикуется» считается зависшим и публикацию можно повторить
+    PUBLISH_STALE_SECONDS: int = 180
     EXPIRING_SOON_DAYS: int = 3
     SCHEDULER_INTERVAL: int = 300  # сек между прогонами планировщика
 

@@ -15,6 +15,9 @@ import { useTonPayment } from "../payments/useTonPayment";
 
 const DOMAIN_RE = /^[a-z0-9][a-z0-9-]{2,124}$/;
 const POLL_INTERVAL = 2500;
+// после этого времени «публикуется» перестаёт быть нормальным ожиданием:
+// показываем причину и даём повторить, а не крутим спиннер бесконечно
+const SLOW_AFTER_MS = 60_000;
 
 export function PublishPage() {
   const { siteId = "" } = useParams();
@@ -38,6 +41,7 @@ export function PublishPage() {
   const [check, setCheck] = useState<DomainCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [slow, setSlow] = useState(false);
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -65,6 +69,7 @@ export function PublishPage() {
 
   const startPolling = useCallback(() => {
     if (pollTimer.current) clearTimeout(pollTimer.current);
+    const startedAt = Date.now();
     const tick = async () => {
       try {
         const result = await sitesApi.publishStatus(siteId);
@@ -73,8 +78,10 @@ export function PublishPage() {
         setPublicUrl(result.public_url);
         setPublishError(result.error);
         if (result.status === "publishing") {
+          setSlow(Date.now() - startedAt > SLOW_AFTER_MS);
           pollTimer.current = setTimeout(() => void tick(), POLL_INTERVAL);
         } else if (result.status === "published") {
+          setSlow(false);
           haptic.success();
           toast(t("publish.published"), "success");
         } else if (result.status === "publish_error") {
@@ -150,6 +157,7 @@ export function PublishPage() {
   async function publish(): Promise<void> {
     setPublishing(true);
     setPublishError(null);
+    setSlow(false);
     try {
       await sitesApi.publish(siteId);
       setStatus("publishing");
@@ -323,6 +331,14 @@ export function PublishPage() {
               <div>{t("publish.publishing")}</div>
             </div>
             <div className="card-sub">{t("publish.publishingHint")}</div>
+            {slow ? (
+              <div style={{ marginTop: 12 }}>
+                <Notice kind="warning">{t("publish.stuck")}</Notice>
+                <Button block loading={publishing} onClick={() => void publish()}>
+                  {t("publish.retry")}
+                </Button>
+              </div>
+            ) : null}
           </>
         ) : null}
 

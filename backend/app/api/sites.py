@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import timezone
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
@@ -52,6 +53,15 @@ def _ensure_custom_code_site(site: Site) -> None:
             "Custom code is only available for sites of type custom_code",
             code="NOT_A_CUSTOM_CODE_SITE",
         )
+
+
+def _publish_is_stale(site: Site) -> bool:
+    started = site.updated_at
+    if started is None:
+        return True
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return (utcnow() - started).total_seconds() > settings.PUBLISH_STALE_SECONDS
 
 
 def _check_content_size(content: dict | None) -> None:
@@ -139,7 +149,10 @@ async def preview_site(
 @router.post("/{site_id}/publish", response_model=PublishResponse)
 async def publish(session: SessionDep, user: CurrentUser, site_id: uuid.UUID) -> PublishResponse:
     site = await _get_site(session, site_id, user)
-    if site.status == SiteStatus.publishing:
+    # Публикация занимает секунды. Если статус висит дольше, задача потеряна
+    # (упал воркер, зависла сеть) — иначе из этого состояния было бы не выйти:
+    # кнопка «Опубликовать» вечно отвечала бы 409.
+    if site.status == SiteStatus.publishing and not _publish_is_stale(site):
         raise Conflict("Site is already being published", code="PUBLISH_IN_PROGRESS")
     await subs_service.ensure_can_publish(session, user, site)
 

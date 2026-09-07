@@ -6,6 +6,7 @@ aiogram-бот, в тестах — заглушка, собирающая от�
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Protocol
 
@@ -13,6 +14,9 @@ from app.core.config import settings
 from app.models import Language
 
 log = logging.getLogger(__name__)
+
+# Telegram может не ответить; задача публикации ждать его не обязана
+SEND_TIMEOUT = 15.0
 
 
 MESSAGES: dict[str, dict[str, str]] = {
@@ -82,13 +86,19 @@ class AiogramTransport:
         if not self._token:
             log.warning("notification skipped: TELEGRAM_BOT_TOKEN is empty")
             return False
-        from aiogram.exceptions import TelegramAPIError
 
         try:
             bot = await self._get_bot()
-            await bot.send_message(chat_id=telegram_id, text=text)
+            # без таймаута зависшее соединение с Telegram останавливает воркер:
+            # публикация уже сделана, но задача не завершается
+            await asyncio.wait_for(
+                bot.send_message(chat_id=telegram_id, text=text), timeout=SEND_TIMEOUT
+            )
             return True
-        except TelegramAPIError as exc:
+        except asyncio.TimeoutError:
+            log.warning("cannot notify %s: Telegram did not answer in %ss", telegram_id, SEND_TIMEOUT)
+            return False
+        except Exception as exc:  # noqa: BLE001 - уведомление никогда не важнее самой задачи
             # пользователь мог не запускать бота или заблокировать его — это не ошибка системы
             log.warning("cannot notify %s: %s", telegram_id, exc)
             return False

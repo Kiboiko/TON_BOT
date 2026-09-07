@@ -416,3 +416,73 @@ async def test_attach_own_domain(client, resolver, queue, storage):
     bind = await client.post(f"/api/sites/{site_id}/dns-bind", headers=h)
     assert bind.status_code == 200, bind.text
     assert bind.json()["transaction"]["messages"][0]["payload"]
+
+
+async def test_stuck_publishing_can_be_retried(client, queue):
+    """Из зависшего «публикуется» должен быть выход: иначе кнопка вечно даёт 409."""
+    from datetime import timedelta
+
+    from app.core.config import settings
+    from app.models import SiteStatus, utcnow
+
+    h = headers_for(6001)
+    created = await client.post("/api/sites", headers=h, json={"type": "links", "title": "Stuck"})
+    site_id = created.json()["site"]["id"]
+
+    async with SessionLocal() as session:
+        site = await session.get(Site, uuid.UUID(site_id))
+        site.status = SiteStatus.publishing
+        await session.commit()
+
+    # свежая публикация: повтор запрещён, задача действительно выполняется
+    busy = await client.post(f"/api/sites/{site_id}/publish", headers=h)
+    assert busy.status_code == 409
+    assert busy.json()["error"]["code"] == "PUBLISH_IN_PROGRESS"
+
+    # задача потеряна: статус висит дольше порога
+    async with SessionLocal() as session:
+        site = await session.get(Site, uuid.UUID(site_id))
+        site.updated_at = utcnow() - timedelta(seconds=settings.PUBLISH_STALE_SECONDS + 60)
+        await session.commit()
+
+    retry = await client.post(f"/api/sites/{site_id}/publish", headers=h)
+    assert retry.status_code == 200
+    assert retry.json()["status"] == "publishing"
+
+
+async def test_publish_result_is_committed_before_notifying(client, queue, storage, notifier):
+    """Telegram не должен решать, опубликован ли сайт.
+
+    Раньше уведомления отправлялись внутри транзакции: зависший запрос к
+    Telegram оставлял сайт навсегда в статусе «публикуется».
+    """
+    import asyncio
+
+    from app.services import notifications
+    from app.services.publishing import run_publish_job
+
+    h = headers_for(6002)
+    created = await client.post("/api/sites", headers=h, json={"type": "links", "title": "Notify"})
+    site_id = created.json()["site"]["id"]
+    await client.post(f"/api/sites/{site_id}/publish", headers=h)
+
+    class HangingTransport:
+        """Транспорт, который никогда не отвечает."""
+
+        async def send(self, telegram_id: int, text: str) -> bool:
+            await asyncio.sleep(3600)
+            return True
+
+    notifications.set_transport(HangingTransport())
+    try:
+        # задача не должна зависнуть вместе с уведомлением
+        await asyncio.wait_for(run_publish_job(site_id), timeout=10)
+    except asyncio.TimeoutError:
+        pass  # уведомление зависло — проверяем, что публикация всё равно сохранена
+    finally:
+        notifications.set_transport(notifier)
+
+    async with SessionLocal() as session:
+        site = await session.get(Site, uuid.UUID(site_id))
+        assert site.status == SiteStatus.published
+        assert site.storage_bag_id

@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import uuid
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -64,14 +65,6 @@ async def publish_site(session: AsyncSession, site: Site) -> Site:
         site.publish_error = describe_error(exc)[:1000]
         await session.flush()
         log.exception("publish failed for site %s", site.id)
-        if user:
-            await notifications.notify(
-                user.telegram_id,
-                "publish_error",
-                user.language,
-                title=site.title,
-                error=describe_error(exc)[:200],
-            )
         return site
 
     site.storage_bag_id = bag.bag_id
@@ -80,22 +73,16 @@ async def publish_site(session: AsyncSession, site: Site) -> Site:
     site.publish_error = None
     await session.flush()
     log.info("site %s published, bag=%s", site.id, bag.bag_id)
-
-    if user:
-        domain = f" на {site.domain}" if site.domain else ""
-        await notifications.notify(
-            user.telegram_id, "site_published", user.language, title=site.title, domain=domain
-        )
-        if site.dns_item_address:
-            # bag id обновился — владельцу нужно подписать новую DNS-запись
-            await notifications.notify(
-                user.telegram_id, "dns_bind_required", user.language, title=site.title
-            )
     return site
 
 
 async def run_publish_job(site_id: str | uuid.UUID) -> None:
-    """Точка входа воркера: своя сессия, свой коммит."""
+    """Точка входа воркера: своя сессия, свой коммит.
+
+    Уведомления отправляются строго после коммита. Раньше они шли внутри
+    транзакции, и зависший запрос к Telegram оставлял сайт навсегда в статусе
+    «публикуется»: результат публикации так и не сохранялся.
+    """
     site_uuid = site_id if isinstance(site_id, uuid.UUID) else uuid.UUID(str(site_id))
     async with SessionLocal() as session:
         site = await session.get(Site, site_uuid)
@@ -103,4 +90,39 @@ async def run_publish_job(site_id: str | uuid.UUID) -> None:
             log.warning("publish job: site %s not found", site_uuid)
             return
         await publish_site(session, site)
+        user = await session.get(User, site.user_id)
+        # значения снимаем до коммита: после него атрибуты нужно было бы перечитывать
+        outcome = {
+            "telegram_id": user.telegram_id if user else None,
+            "language": user.language if user else None,
+            "status": site.status,
+            "title": site.title,
+            "domain": site.domain,
+            "dns_item_address": site.dns_item_address,
+            "error": site.publish_error,
+        }
         await session.commit()
+
+    await _notify_publish_result(outcome)
+
+
+async def _notify_publish_result(outcome: dict[str, Any]) -> None:
+    """Сообщение пользователю об итоге публикации — уже вне транзакции."""
+    telegram_id = outcome["telegram_id"]
+    if telegram_id is None:
+        return
+    language = outcome["language"]
+    title = outcome["title"]
+
+    if outcome["status"] == SiteStatus.published:
+        domain = f" на {outcome['domain']}" if outcome["domain"] else ""
+        await notifications.notify(
+            telegram_id, "site_published", language, title=title, domain=domain
+        )
+        if outcome["dns_item_address"]:
+            # bag id обновился — владельцу нужно подписать новую DNS-запись
+            await notifications.notify(telegram_id, "dns_bind_required", language, title=title)
+    elif outcome["status"] == SiteStatus.publish_error:
+        await notifications.notify(
+            telegram_id, "publish_error", language, title=title, error=(outcome["error"] or "")[:200]
+        )
