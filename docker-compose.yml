@@ -93,6 +93,10 @@ services:
   # поэтому каталог сайтов должен быть виден обоим по одному и тому же пути,
   # а ключи для storage-daemon-cli демон генерирует сам в своей БД.
   storage-daemon:
+    # STORAGE_ADNL_ADDR обязателен на боевом сервере: демон объявляет этот адрес
+    # в DHT, и по нему остальные узлы (в том числе шлюзы .ton) качают бэги.
+    # С 0.0.0.0 сайт публикуется, домен на него указывает, но скачать его
+    # неоткуда — шлюз отвечает «bag has no reachable peers».
     image: ${TON_STORAGE_IMAGE:-ghcr.io/ton-blockchain/ton:latest}
     # Демон создаёт ключи для CLI под root и с закрытыми правами, а backend
     # работает под непривилегированным пользователем — открываем их на чтение,
@@ -100,7 +104,7 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        storage-daemon -v 2 -C /var/ton-work/global.config.json           -I 0.0.0.0:3333 -p 5555 -D /var/ton-work/db &
+        storage-daemon -v 2 -C /var/ton-work/global.config.json           -I ${STORAGE_ADNL_ADDR:-0.0.0.0:3333} -p 5555 -D /var/ton-work/db &
         daemon=$$!
         while [ ! -f /var/ton-work/db/cli-keys/client ]; do sleep 1; done
         chmod -R a+rX /var/ton-work/db/cli-keys

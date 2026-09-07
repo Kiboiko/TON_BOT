@@ -125,6 +125,19 @@ curl -o /opt/ton-site-builder/storage/global.config.json \
 cd /opt/ton-site-builder
 docker compose up -d --build                    # без storage-daemon
 docker compose --profile storage up -d --build  # вместе с storage-daemon
+
+> **Обязательно для боевого сервера.** В `.env` рядом с `docker-compose.yml`
+> задайте публичный адрес демона:
+>
+> ```
+> STORAGE_ADNL_ADDR=<публичный_ip_сервера>:3333
+> ```
+>
+> Этот адрес демон объявляет в DHT — по нему остальные узлы сети, включая
+> шлюзы `.ton`, скачивают опубликованные сайты. Со значением по умолчанию
+> (`0.0.0.0`) публикация проходит, домен указывает на нужный bag, но открыть
+> сайт нельзя: шлюз отвечает «bag has no reachable peers». Порт 3333/udp
+> должен быть открыт наружу.
 ```
 
 Поднимутся: postgres, redis, migrate (миграции + тарифы), backend, worker,
