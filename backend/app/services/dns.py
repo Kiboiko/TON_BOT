@@ -17,6 +17,7 @@ import time
 
 from app.core.errors import BadRequest
 from app.services.subdom_client import TransactionMessage, TransactionResponse
+from app.services.ton import to_user_friendly
 
 OP_CHANGE_DNS_RECORD = 0x4EB1F0F9
 DNS_STORAGE_PREFIX = 0x7473  # "ts" — dns_storage_address
@@ -72,7 +73,8 @@ def build_set_storage_transaction(
         valid_until=int(time.time()) + valid_for,
         messages=[
             TransactionMessage(
-                address=dns_item_address,
+                # из tonapi адрес приходит сырым, а кошелёк примет только EQ…
+                address=to_user_friendly(dns_item_address),
                 amount=amount_nano,
                 payload=build_set_storage_payload(bag_id),
             )

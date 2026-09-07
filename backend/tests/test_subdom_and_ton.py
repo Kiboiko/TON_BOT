@@ -335,3 +335,61 @@ async def test_ton_proof_works_for_undeployed_wallet(v5: bool):
         address, ts, domain, bad, payload,
         state_init=state_init, allowed_domain=domain, client=client,
     )
+
+
+def test_dns_bind_address_is_user_friendly():
+    """TON Connect принимает только EQ…/UQ…: сырой адрес кошелёк отвергает.
+
+    Из tonapi адрес DNS-item приходит сырым, и на проде кошелёк отвечал
+    «Wrong 'address' format in message at index 0».
+    """
+    from app.services.dns import build_set_storage_transaction
+
+    raw = "0:dd3a6b455eeb887660a43bee729f5337733c6d051c0466402618b73ed86e3b05"
+    tx = build_set_storage_transaction(raw, "A" * 64)
+    address = tx.messages[0].address
+
+    assert address.startswith("EQ")
+    assert len(address) == 48
+    assert ":" not in address
+
+    # уже user-friendly адрес не портим
+    same = build_set_storage_transaction(address, "A" * 64)
+    assert same.messages[0].address == address
+
+
+def test_storage_cli_error_shows_real_reason():
+    """Настоящая ошибка демона лежит в stdout, а stderr забит служебным логом."""
+    from app.services.storage import clean_cli_output
+
+    noise = (
+        "\x1b[1;36m[ 3][t 0][2026-09-07 19:22:15][storage-daemon-cli.cpp:229]"
+        "[!extclient]\tConnected\x1b[0m"
+    )
+    assert clean_cli_output(noise) == ""
+
+    real = noise + "\nQuery error: Cannot add torrent: duplicate hash " + "A" * 64
+    assert clean_cli_output(real) == "Query error: Cannot add torrent: duplicate hash " + "A" * 64
+
+
+async def test_republish_without_changes_is_not_an_error(tmp_path):
+    """Публикация сайта без изменений даёт тот же bag: демон отказывает, мы — нет."""
+    from app.core.errors import StorageError
+    from app.services.storage import StorageDaemonBackend
+
+    bag = "890C67A47046D99A993B1B1237FF6FF47B5E15C86CBFA70B26DB08E62CB93F5C"
+    site_dir = tmp_path / "site"
+    site_dir.mkdir()
+    (site_dir / "index.html").write_text("<html></html>", encoding="utf-8")
+
+    backend = StorageDaemonBackend()
+
+    async def duplicate(_command: str) -> str:
+        raise StorageError(
+            f"storage-daemon-cli failed: Query error: Cannot add torrent: duplicate hash {bag}"
+        )
+
+    backend._run = duplicate  # noqa: SLF001 - подменяем вызов CLI
+    info = await backend.upload_directory(site_dir)
+    assert info.bag_id == bag
+    assert info.files == 1

@@ -39,6 +39,25 @@ def from_nano(amount: int | str) -> Decimal:
     return Decimal(int(amount)) / NANO
 
 
+def to_user_friendly(address: str, *, bounceable: bool = True) -> str:
+    """Адрес в виде EQ…/UQ… — именно его требует TON Connect.
+
+    Кошельки отвергают сырой `0:hex` с ошибкой «Wrong 'address' format»,
+    а из блокчейн-API адреса приходят как раз в сыром виде.
+    """
+    from pytoniq_core import Address
+
+    address = (address or "").strip()
+    if not address:
+        return ""
+    try:
+        return Address(address).to_str(
+            is_user_friendly=True, is_bounceable=bounceable, is_url_safe=True
+        )
+    except Exception:  # noqa: BLE001 - не наш адрес: отдаём как есть, провалидирует кошелёк
+        return address
+
+
 def normalize_address(address: str) -> str:
     """Приводит адрес к каноничной форме `workchain:hex` для сравнения.
 

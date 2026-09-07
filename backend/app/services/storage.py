@@ -20,6 +20,7 @@ import binascii
 import hashlib
 import json
 import logging
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -98,6 +99,25 @@ def parse_create_output(stdout: str) -> dict[str, Any]:
         raise StorageError("Cannot parse storage daemon response") from exc
 
 
+# строки лога самой утилиты: [ 3][t 0][2026-09-07 ...][storage-daemon-cli.cpp:229][!extclient] Connected
+_ANSI_RE = re.compile("\\x1b\\[[0-9;]*m")
+_CLI_LOG_RE = re.compile(r"^\[\s*\d+\]\[t\s*\d+\]\[")
+# демон отказывается добавлять бэг, который у него уже есть
+_DUPLICATE_RE = re.compile(r"duplicate hash ([0-9A-Fa-f]{64})")
+
+
+def clean_cli_output(text: str) -> str:
+    """Оставляет от вывода CLI только осмысленные строки.
+
+    Утилита пишет в stderr цветной служебный лог («Connected»), а настоящую
+    ошибку — в stdout. Без чистки пользователь получал в уведомлении именно
+    служебную строку вместо причины.
+    """
+    text = _ANSI_RE.sub("", text or "")
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return "\n".join(line for line in lines if not _CLI_LOG_RE.match(line))
+
+
 def run_cli(args: list[str], timeout: float) -> subprocess.CompletedProcess[bytes]:
     """Синхронный запуск CLI в отдельном потоке.
 
@@ -152,14 +172,27 @@ class StorageDaemonBackend:
         out = completed.stdout.decode("utf-8", "replace")
         err = completed.stderr.decode("utf-8", "replace")
         if completed.returncode != 0:
-            raise StorageError(f"storage-daemon-cli failed: {(err or out).strip()[:200]}")
+            reason = clean_cli_output(out) or clean_cli_output(err) or "no output"
+            raise StorageError(f"storage-daemon-cli failed: {reason[:300]}")
         if "Unknown command" in out or "Error" in err:
             log.warning("storage-daemon-cli: %s", (err or out).strip()[:200])
         return out
 
     async def upload_directory(self, path: Path, description: str = "") -> BagInfo:
         # путь разрешает демон, поэтому каталог обязан быть в общем томе
-        out = await self._run(f"create {path.as_posix()} --json")
+        try:
+            out = await self._run(f"create {path.as_posix()} --json")
+        except StorageError as exc:
+            # bag id считается от содержимого, поэтому публикация сайта без
+            # изменений даёт тот же хэш, а демон отказывается добавлять его
+            # второй раз. Для пользователя это не ошибка: контент уже в сети.
+            duplicate = _DUPLICATE_RE.search(str(exc))
+            if duplicate is None:
+                raise
+            bag_id = duplicate.group(1).upper()
+            size, files = _dir_stats(path)
+            log.info("site already in TON Storage: bag=%s files=%s size=%s", bag_id, files, size)
+            return BagInfo(bag_id=bag_id, size=size, files=files, path=str(path))
         data = parse_create_output(out)
         torrent = data.get("torrent") or {}
         bag_id = parse_bag_id(str(torrent.get("hash", "")))
