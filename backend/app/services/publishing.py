@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.db import SessionLocal
+from app.core.errors import describe_error
 from app.models import Site, SiteStatus, User, utcnow
 from app.services import notifications
 from app.services.renderer import render_site
@@ -60,7 +61,7 @@ async def publish_site(session: AsyncSession, site: Site) -> Site:
         )
     except Exception as exc:  # noqa: BLE001 — любая ошибка публикации фиксируется в БД
         site.status = SiteStatus.publish_error
-        site.publish_error = str(exc)[:1000]
+        site.publish_error = describe_error(exc)[:1000]
         await session.flush()
         log.exception("publish failed for site %s", site.id)
         if user:
@@ -69,7 +70,7 @@ async def publish_site(session: AsyncSession, site: Site) -> Site:
                 "publish_error",
                 user.language,
                 title=site.title,
-                error=str(exc)[:200],
+                error=describe_error(exc)[:200],
             )
         return site
 

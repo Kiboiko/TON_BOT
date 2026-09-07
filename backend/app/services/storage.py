@@ -21,6 +21,7 @@ import hashlib
 import json
 import logging
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -97,6 +98,20 @@ def parse_create_output(stdout: str) -> dict[str, Any]:
         raise StorageError("Cannot parse storage daemon response") from exc
 
 
+def run_cli(args: list[str], timeout: float) -> subprocess.CompletedProcess[bytes]:
+    """Синхронный запуск CLI в отдельном потоке.
+
+    Намеренно не asyncio.create_subprocess_exec: aiogram при импорте подменяет
+    политику asyncio на uvloop (aiogram/__init__.py), а цикл к этому моменту уже
+    создан обычным asyncio. После такой подмены create_subprocess_exec идёт за
+    child watcher в чужую политику и падает с пустым NotImplementedError.
+    На практике это выглядело так: первая публикация проходила, отправляла
+    уведомление через aiogram — и все следующие публикации в этом процессе
+    ломались. subprocess.run про политику asyncio ничего не знает.
+    """
+    return subprocess.run(args, capture_output=True, timeout=timeout, check=False)
+
+
 class StorageDaemonBackend:
     """Клиент ton-storage-daemon через storage-daemon-cli.
 
@@ -128,21 +143,15 @@ class StorageDaemonBackend:
             "-c", "exit",
         ]
         try:
-            process = await asyncio.create_subprocess_exec(
-                *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-            )
+            completed = await asyncio.to_thread(run_cli, args, self._timeout)
         except FileNotFoundError as exc:
             raise StorageError(f"storage-daemon-cli not found: {self._cli}") from exc
-
-        try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=self._timeout)
-        except asyncio.TimeoutError as exc:
-            process.kill()
+        except subprocess.TimeoutExpired as exc:
             raise StorageError("Storage daemon did not respond in time") from exc
 
-        out = stdout.decode("utf-8", "replace")
-        err = stderr.decode("utf-8", "replace")
-        if process.returncode != 0:
+        out = completed.stdout.decode("utf-8", "replace")
+        err = completed.stderr.decode("utf-8", "replace")
+        if completed.returncode != 0:
             raise StorageError(f"storage-daemon-cli failed: {(err or out).strip()[:200]}")
         if "Unknown command" in out or "Error" in err:
             log.warning("storage-daemon-cli: %s", (err or out).strip()[:200])

@@ -385,3 +385,43 @@ async def test_image_upload(client):
     # без авторизации загрузка недоступна
     anon = await client.post("/api/uploads", files={"file": ("photo.png", png(), "image/png")})
     assert anon.status_code == 401
+
+
+def test_storage_cli_survives_event_loop_policy_swap():
+    """Запуск storage-daemon-cli не должен зависеть от политики asyncio.
+
+    aiogram при импорте подменяет политику на uvloop, и цикл, созданный обычным
+    asyncio, после этого не может породить подпроцесс: create_subprocess_exec
+    уходит за child watcher в чужую политику. На проде это ломало все публикации
+    после первого же уведомления в Telegram.
+    """
+    import asyncio
+    import subprocess
+    import sys
+
+    from app.services.storage import run_cli
+
+    class PolicyWithoutChildWatcher(asyncio.DefaultEventLoopPolicy):
+        def get_child_watcher(self):  # noqa: D102 - имитируем политику uvloop
+            raise NotImplementedError
+
+    original = asyncio.get_event_loop_policy()
+    try:
+        async def main() -> subprocess.CompletedProcess[bytes]:
+            # политику подменяем уже после старта цикла — как это делает aiogram
+            asyncio.set_event_loop_policy(PolicyWithoutChildWatcher())
+            return await asyncio.to_thread(run_cli, [sys.executable, "-c", "print('ok')"], 30)
+
+        completed = asyncio.run(main())
+        assert completed.returncode == 0
+        assert b"ok" in completed.stdout
+    finally:
+        asyncio.set_event_loop_policy(original)
+
+
+def test_publish_error_message_is_never_empty():
+    """У NotImplementedError пустой текст — в уведомлении оставалось «Причина:» ни с чем."""
+    from app.core.errors import describe_error
+
+    assert describe_error(NotImplementedError()) == "NotImplementedError"
+    assert describe_error(ValueError("нет связи")) == "нет связи"

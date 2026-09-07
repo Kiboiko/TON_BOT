@@ -143,3 +143,14 @@ def register_error_handlers(app: FastAPI) -> None:
             status_code=500,
             content={"error": {"code": "INTERNAL_ERROR", "message": "Internal server error"}},
         )
+
+
+def describe_error(exc: BaseException) -> str:
+    """Текст ошибки для пользователя.
+
+    У части исключений сообщение пустое (классический пример — NotImplementedError),
+    и тогда в уведомлении оставалось «Причина:» без причины. Подставляем хотя бы
+    имя класса: по нему ошибку уже можно найти в логах.
+    """
+    text = str(exc).strip()
+    return text or type(exc).__name__
