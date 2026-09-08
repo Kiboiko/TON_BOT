@@ -109,8 +109,21 @@ git clone --recurse-submodules https://github.com/ton-blockchain/ton.git /opt/to
 cd /opt/ton && mkdir build && cd build
 cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc) storage-daemon
 curl -o /opt/ton-site-builder/storage/global.config.json \
-  https://ton.org/global-config.json    # для testnet: global.config.json из testnet
+  https://ton.org/global.config.json    # mainnet
 ```
+
+> **Сеть конфига обязана совпадать с сетью доменов.** Домены `.ton` живут в
+> mainnet, поэтому storage-daemon и ton-site должны брать mainnet-конфиг. С
+> testnet-конфигом всё выглядит рабочим — сайт публикуется, бэг создаётся,
+> ADNL-адрес поднимается — но объявляются они в testnet-DHT, а клиенты и шлюзы
+> ищут в mainnet-DHT и не находят. Проверка:
+>
+> ```bash
+> python3 -c "import json;print(json.load(open('storage/global.config.json'))['validator']['zero_state']['file_hash'])"
+> # mainnet должен дать XplPz01CXAps5qeSWUtxcyBfdAo5zVb1N979KLSKD24=
+> ```
+>
+> Для testnet-стенда берётся `https://ton.org/testnet-global.config.json`.
 
 Затем либо соберите образ и укажите его в `TON_STORAGE_IMAGE`, либо запустите
 демон на хосте и укажите его адрес в `TON_STORAGE_API`. Каталог `SITES_BUILD_DIR`
