@@ -197,8 +197,11 @@ class DomainClaimRequest(BaseModel):
 
 
 class DomainClaimResponse(BaseModel):
-    transaction: TonConnectTransaction
+    # None, когда субдомен уже выпущен на кошелёк пользователя: платить второй
+    # раз не за что, домен просто закрепляется за сайтом
+    transaction: TonConnectTransaction | None = None
     domain: str
+    already_owned: bool = False
 
 
 class DomainAttachRequest(BaseModel):

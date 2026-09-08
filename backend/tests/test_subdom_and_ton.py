@@ -527,3 +527,56 @@ def test_real_resolver_implements_full_interface():
     for impl in (TonApiResolver, FakeResolver):
         missing = [n for n in required if not callable(getattr(impl, n, None))]
         assert not missing, f"{impl.__name__} не реализует: {missing}"
+
+
+async def test_claim_does_not_charge_twice_for_owned_subdomain(client, resolver):
+    """Повторное «получить» не берёт денег, если субдомен уже выпущен.
+
+    Кошелёк отдаёт ошибку и после успешной отправки транзакции, поэтому
+    пользователь жмёт кнопку ещё раз. Раньше это упиралось в 409 DOMAIN_TAKEN:
+    имя занято, а чьё — резолвер не знает. Домен оставался неприкреплённым,
+    хотя NFT уже оплачен.
+    """
+    from tests.conftest import headers_for
+
+    h = headers_for(7901)
+    await client.post("/api/user/auth", headers=h, json={})
+    wallet = "0:" + "9" * 64
+    async with SessionLocal() as session:
+        user = await session.scalar(select(User).where(User.telegram_id == 7901))
+        user.wallet_address = wallet
+        await session.commit()
+        await set_zone(
+            session,
+            domain="tonsite.ton",
+            dns_item_address="0:" + "ab" * 32,
+            collection_address="0:" + "cd" * 32,
+            mode="sbt",
+        )
+        await session.commit()
+
+    site_id = (
+        await client.post("/api/sites", headers=h, json={"type": "landing", "title": "L"})
+    ).json()["site"]["id"]
+
+    # NFT выпущен на кошелёк пользователя, но DNS-индекс имя не показывает
+    resolver.own("promo.tonsite.ton", wallet, item_address="0:" + "ee" * 32)
+    resolver.dns_index_blind = True
+
+    # проверка имени говорит «занято», но владельцем показывает самого пользователя
+    check = await client.get("/api/domains/check?name=promo", headers=h)
+    assert check.status_code == 200
+    assert check.json()["available"] is False
+    assert check.json()["owner"] == wallet
+
+    again = await client.post(
+        "/api/domains/claim", headers=h, json={"site_id": site_id, "name": "promo"}
+    )
+    assert again.status_code == 200, again.text
+    body = again.json()
+    assert body["already_owned"] is True
+    assert body["transaction"] is None, "второй раз платить не за что"
+
+    site = (await client.get(f"/api/sites/{site_id}", headers=h)).json()["site"]
+    assert site["domain"] == "promo.tonsite.ton"
+    assert site["dns_item_address"] == "0:" + "ee" * 32

@@ -138,6 +138,7 @@ export const en: Translations = {
     walletRequired: "Connect your wallet first",
     connectWallet: "Connect wallet",
     waiting: "Waiting for the transaction on-chain…",
+    pending: "Payment went through. The domain is still being issued — tap Get again in a minute, you will not be charged twice",
     attached: "Domain attached",
     current: "Current domain",
   },

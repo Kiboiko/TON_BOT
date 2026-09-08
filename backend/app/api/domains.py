@@ -54,7 +54,7 @@ def _validate_name(name: str) -> str:
 @router.get("/check", response_model=DomainCheckResponse)
 async def check_domain(
     session: SessionDep,
-    _: CurrentUser,
+    user: CurrentUser,
     name: str = Query(min_length=1, max_length=126),
 ) -> DomainCheckResponse:
     """Свободно ли имя в зоне платформы. Проверяется резолвом в блокчейне."""
@@ -62,8 +62,25 @@ async def check_domain(
     if not zone.configured:
         raise BadRequest("Subdomain zone is not configured yet", code="ZONE_NOT_CONFIGURED")
 
-    domain = full_domain(_validate_name(name), zone)
-    info = await get_resolver().resolve(domain)
+    clean = _validate_name(name)
+    domain = full_domain(clean, zone)
+    resolver = get_resolver()
+
+    # занятый субдомен может принадлежать самому пользователю — тогда это не
+    # «занято», а «уже ваш»: интерфейсу нужно предложить привязку, а не отказ
+    if user.wallet_address and zone.collection_address:
+        mine = await resolver.find_subdomain(zone.collection_address, clean, user.wallet_address)
+        if mine is not None:
+            return DomainCheckResponse(
+                available=False,
+                status="taken",
+                domain=domain,
+                zone=zone.domain,
+                item_address=mine.item_address,
+                owner=user.wallet_address,
+            )
+
+    info = await resolver.resolve(domain)
     return DomainCheckResponse(
         available=info.available,
         status=info.status,
@@ -91,7 +108,25 @@ async def claim_domain(
     name = _validate_name(body.name)
     domain = full_domain(name, zone)
 
-    info = await get_resolver().resolve(domain)
+    resolver = get_resolver()
+
+    # Субдомен мог быть уже выпущен: кошелёк отдаёт ошибку и после успешной
+    # отправки, и пользователь жмёт «получить» повторно. Второй раз платить не
+    # за что — домен просто закрепляется за сайтом.
+    mine = None
+    if zone.collection_address:
+        mine = await resolver.find_subdomain(zone.collection_address, name, wallet)
+    if mine is not None:
+        site.domain = domain
+        site.tld = zone.domain
+        site.collection_address = zone.collection_address
+        if mine.item_address:
+            site.dns_item_address = mine.item_address
+        await session.flush()
+        log.info("subdomain %s already owned by %s, attached", domain, wallet)
+        return DomainClaimResponse(transaction=None, domain=domain, already_owned=True)
+
+    info = await resolver.resolve(domain)
     if not info.available and not same_address(info.owner, wallet):
         raise Conflict("Subdomain is already taken", code="DOMAIN_TAKEN")
 

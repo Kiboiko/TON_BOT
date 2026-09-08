@@ -141,15 +141,32 @@ export function PublishPage() {
 
   async function attachDomain(): Promise<void> {
     try {
-      const { transaction, domain } = await domainsApi.claim({
+      const { transaction, domain, already_owned } = await domainsApi.claim({
         site_id: siteId,
         name: name.trim().toLowerCase(),
       });
+
+      // Субдомен уже выпущен на этот кошелёк — платить второй раз не за что.
+      // Так бывает, когда кошелёк отдал ошибку, хотя транзакция ушла.
+      if (already_owned || !transaction) {
+        toast(t("domain.attached"), "success");
+        const { site: owned } = await sitesApi.get(siteId);
+        setSite(owned);
+        void checkDirect();
+        return;
+      }
+
       // домен закрепится за сайтом только после того, как backend увидит
       // выпущенный субдомен в блокчейне, поэтому передаём его явно
       const result = await payment.pay(transaction, (txHash) =>
         domainsApi.confirm({ site_id: siteId, tx_hash: txHash, domain }),
       );
+      if (result && result.status === "pending") {
+        // выпуск ещё не долетел до сети: оплата прошла, домен закрепится с
+        // повторного нажатия — молча показывать успех здесь было бы враньём
+        toast(t("domain.pending"), "info");
+        return;
+      }
       if (result) {
         toast(t("domain.attached"), "success");
         const { site: updated } = await sitesApi.get(siteId);

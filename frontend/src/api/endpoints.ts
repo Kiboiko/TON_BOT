@@ -75,7 +75,11 @@ export const uploadsApi = {
 export const domainsApi = {
   check: (name: string) => api.get<DomainCheck>("/domains/check", { name }),
   claim: (body: { site_id: string; name: string }) =>
-    api.post<{ transaction: TonConnectTransaction; domain: string }>("/domains/claim", body),
+    api.post<{
+      transaction: TonConnectTransaction | null;
+      domain: string;
+      already_owned: boolean;
+    }>("/domains/claim", body),
   // привязка домена .ton, которым пользователь уже владеет
   attach: (body: { site_id: string; domain: string }) =>
     api.post<{ domain: string; item_address: string | null; needs_publish: boolean }>(
