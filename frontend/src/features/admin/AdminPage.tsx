@@ -536,7 +536,12 @@ function ZoneTab() {
   const payment = useTonPayment();
 
   const [zone, setZone] = useState<Zone | null>(null);
-  const [form, setForm] = useState({ domain: "", dns_item_address: "", collection_address: "" });
+  const [form, setForm] = useState<{
+    domain: string;
+    dns_item_address: string;
+    collection_address: string;
+    mode: "proxy" | "sbt";
+  }>({ domain: "", dns_item_address: "", collection_address: "", mode: "sbt" });
 
   const load = useCallback(async () => {
     try {
@@ -546,6 +551,7 @@ function ZoneTab() {
         domain: data.domain,
         dns_item_address: data.dns_item_address,
         collection_address: data.collection_address,
+        mode: data.mode,
       });
     } catch (error) {
       toastError(error);
@@ -608,6 +614,20 @@ function ZoneTab() {
           placeholder="0:…"
         />
       </Field>
+
+      <Field label={t("admin.zone.mode")} hint={t("admin.zone.modeHint")}>
+        <Segmented<"sbt" | "proxy">
+          value={form.mode}
+          onChange={(value) => setForm((f) => ({ ...f, mode: value }))}
+          options={[
+            { value: "sbt", label: t("admin.zone.modeSbt") },
+            { value: "proxy", label: t("admin.zone.modeProxy") },
+          ]}
+        />
+      </Field>
+      {zone.configured && zone.mode !== form.mode ? (
+        <Notice kind="danger">{t("admin.zone.modeLocked")}</Notice>
+      ) : null}
 
       <Field label={t("admin.zone.collection")} hint={t("admin.zone.collectionHint")}>
         <Input
