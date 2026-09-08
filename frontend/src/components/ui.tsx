@@ -5,6 +5,19 @@ import { createPortal } from "react-dom";
 import { useAppStore } from "../store/app";
 import { haptic } from "../telegram/webapp";
 
+/**
+ * Куда выносить оверлеи — шторку и тосты.
+ *
+ * Именно `.app` задаёт видимую область: его высота приходит из Telegram, и
+ * нижняя навигация стоит ровно по его нижней границе. Абсолютное
+ * позиционирование внутри него совпадает с экраном по построению — в отличие от
+ * position:fixed, который отсчитывается от layout viewport, а тот в Telegram
+ * выше видимой части. До монтирования каркаса (первый рендер) уходим в body.
+ */
+function overlayRoot(): HTMLElement {
+  return (document.querySelector(".app") as HTMLElement | null) ?? document.body;
+}
+
 export function Spinner({ large = false }: { large?: boolean }) {
   return <div className={large ? "spinner spinner-lg" : "spinner"} aria-label="loading" />;
 }
@@ -335,7 +348,7 @@ export function Sheet({
         {children}
       </div>
     </div>,
-    document.body,
+    overlayRoot(),
   );
 }
 
@@ -382,6 +395,6 @@ export function Toasts() {
         </div>
       ))}
     </div>,
-    document.body,
+    overlayRoot(),
   );
 }
