@@ -151,3 +151,24 @@ def build_set_site_transaction(
             )
         ],
     )
+
+
+async def direct_delivery_ready(domain: str | None) -> bool | None:
+    """Указывает ли домен на наш TON-сайт. None — проверить не удалось.
+
+    Адрес прокси не меняется от публикации к публикации, поэтому запись
+    подписывается один раз на домен: повторно дёргать владельца незачем.
+    """
+    from app.core.config import settings
+    from app.services.dns_resolver import get_resolver
+
+    if not domain or not settings.TON_SITE_ADNL:
+        return None
+    try:
+        ours = decode_adnl_address(settings.TON_SITE_ADNL).hex()
+    except BadRequest:
+        return None
+    current = await get_resolver().site_adnl(domain)
+    if current is None:
+        return None
+    return current == ours

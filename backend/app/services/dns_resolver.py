@@ -42,6 +42,8 @@ class DomainResolver(Protocol):
         self, collection_address: str, name: str, owner: str
     ) -> DomainInfo | None: ...
 
+    async def site_adnl(self, domain: str) -> str | None: ...
+
     async def contract_deployed(self, address: str) -> bool | None: ...
 
     async def close(self) -> None: ...
@@ -162,6 +164,28 @@ class TonApiResolver:
             )
         return None
 
+    async def site_adnl(self, domain: str) -> str | None:
+        """ADNL-адрес из DNS-записи `site` домена, hex в нижнем регистре.
+
+        Нужен, чтобы не просить владельца подписывать запись повторно: адрес
+        нашего прокси не меняется, поэтому одной подписи на домен достаточно.
+        """
+        client = await self._get_client()
+        try:
+            resp = await client.get(f"/v2/dns/{domain}/resolve")
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            log.warning("site record %s failed: %s", domain, exc)
+            return None
+        if resp.status_code >= 400:
+            return None
+        try:
+            sites = (resp.json() or {}).get("sites") or []
+        except ValueError:
+            return None
+        if not sites:
+            return None
+        return str(sites[0]).removeprefix("http://").removeprefix("https://").strip().lower()
+
     async def contract_deployed(self, address: str) -> bool | None:
         """Есть ли контракт по адресу. None — проверить не удалось.
 
@@ -204,6 +228,8 @@ class FakeResolver:
         self.deployed: dict[str, bool | None] = {}
         # имитация tonapi: DNS-индекс не знает субдоменов сторонних коллекций
         self.dns_index_blind = False
+        # домен -> ADNL в записи `site`
+        self.site_records: dict[str, str] = {}
 
     def own(self, domain: str, owner: str, item_address: str | None = None) -> None:
         self.owned[domain.strip().lower()] = owner
@@ -243,6 +269,9 @@ class FakeResolver:
             item_address=self.FAKE_ITEM,
             owner=self.owned[domain],
         )
+
+    async def site_adnl(self, domain: str) -> str | None:
+        return self.site_records.get(domain.strip().lower())
 
     async def contract_deployed(self, address: str) -> bool | None:
         return self.deployed.get(address, True)

@@ -185,8 +185,16 @@ async def _notify_publish_result(outcome: dict[str, Any]) -> None:
             telegram_id, "site_published", language, title=title, domain=domain
         )
         if outcome["dns_item_address"]:
-            # bag id обновился — владельцу нужно подписать новую DNS-запись
-            await notifications.notify(telegram_id, "dns_bind_required", language, title=title)
+            # Адрес нашего прокси не меняется, поэтому запись домена нужна
+            # ровно один раз. Дёргаем владельца только когда точно знаем,
+            # что она ещё не стоит: раньше просьба уходила после каждой
+            # публикации, хотя подписывать было нечего.
+            from app.services.dns import direct_delivery_ready
+
+            if await direct_delivery_ready(outcome["domain"]) is False:
+                await notifications.notify(
+                    telegram_id, "dns_bind_required", language, title=title
+                )
     elif outcome["status"] == SiteStatus.publish_error:
         await notifications.notify(
             telegram_id, "publish_error", language, title=title, error=(outcome["error"] or "")[:200]

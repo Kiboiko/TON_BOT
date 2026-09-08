@@ -58,6 +58,8 @@ export const sitesApi = {
   dnsBind: (id: string) => api.post<{ transaction: TonConnectTransaction }>(`/sites/${id}/dns-bind`),
   siteBind: (id: string) =>
     api.post<{ transaction: TonConnectTransaction }>(`/sites/${id}/site-bind`),
+  dnsStatus: (id: string) =>
+    api.get<{ domain: string | null; direct: boolean | null }>(`/sites/${id}/dns-status`),
 
   // проект типа «Свой код»: код доступен по подписке
   setCustomCode: (id: string, body: CustomCode) =>

@@ -19,6 +19,7 @@ from app.models import (
 from app.schemas import (
     CustomCodeRequest,
     DnsBindResponse,
+    DnsStatusResponse,
     PreviewResponse,
     PublishResponse,
     PublishStatusResponse,
@@ -31,7 +32,11 @@ from app.schemas import (
 )
 from app.services import subscriptions as subs_service
 from app.api.public import public_site_url
-from app.services.dns import build_set_site_transaction, build_set_storage_transaction
+from app.services.dns import (
+    build_set_site_transaction,
+    build_set_storage_transaction,
+    direct_delivery_ready,
+)
 from app.services.publishing import build_site_html, enqueue_publish, publish_is_stale
 from app.services.renderer import content_size, default_content_for, render_site
 
@@ -175,6 +180,17 @@ async def dns_bind(
         raise BadRequest("Site is not published yet", code="SITE_NOT_PUBLISHED")
     tx = build_set_storage_transaction(site.dns_item_address or "", site.storage_bag_id)
     return DnsBindResponse(transaction=TonConnectTransaction(**tx.to_tonconnect()))
+
+
+@router.get("/{site_id}/dns-status", response_model=DnsStatusResponse)
+async def dns_status(
+    session: SessionDep, user: CurrentUser, site_id: uuid.UUID
+) -> DnsStatusResponse:
+    """Настроен ли домен на прямую отдачу — чтобы не просить подпись повторно."""
+    site = await _get_site(session, site_id, user)
+    return DnsStatusResponse(
+        domain=site.domain, direct=await direct_delivery_ready(site.domain)
+    )
 
 
 @router.post("/{site_id}/site-bind", response_model=DnsBindResponse)

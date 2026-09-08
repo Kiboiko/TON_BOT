@@ -38,6 +38,8 @@ export function PublishPage() {
   const [name, setName] = useState("");
   const [ownDomain, setOwnDomain] = useState("");
   const [attaching, setAttaching] = useState(false);
+  // null — проверить не удалось; кнопку прячем только при явном true
+  const [directReady, setDirectReady] = useState<boolean | null>(null);
   const [check, setCheck] = useState<DomainCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -57,7 +59,15 @@ export function PublishPage() {
         if (loaded.status === "published") {
           void sitesApi.publishStatus(siteId).then((s) => setPublicUrl(s.public_url));
         }
-        if (loaded.domain) setName(loaded.domain.split(".")[0]);
+        if (loaded.domain) {
+          setName(loaded.domain.split(".")[0]);
+          // одна проверка при открытии: если домен уже направлен на сайт,
+          // подпись повторно не предлагаем
+          void sitesApi
+            .dnsStatus(siteId)
+            .then((s) => setDirectReady(s.direct))
+            .catch(() => setDirectReady(null));
+        }
         if (loaded.status === "publishing") startPolling();
       })
       .catch(toastError);
@@ -176,25 +186,27 @@ export function PublishPage() {
     }
   }
 
-  async function bindDns(): Promise<void> {
+  // Единственный способ привязки: домен ведёт прямо на наш сервер. Раздача
+  // через TON Storage зависит от публичных шлюзов, а они бэги новых сайтов не
+  // отдают. Адрес прокси не меняется, поэтому подпись нужна один раз на домен.
+  async function bindSite(): Promise<void> {
     try {
-      const { transaction } = await sitesApi.dnsBind(siteId);
+      const { transaction } = await sitesApi.siteBind(siteId);
       const result = await payment.pay(transaction, async () => ({ ok: true }));
-      if (result) toast(t("publish.bound"), "success");
+      if (result) {
+        toast(t("publish.bound"), "success");
+        void checkDirect();
+      }
     } catch (error) {
       toastError(error);
     }
   }
 
-  // Вторая, независимая запись домена: она ведёт прямо на наш сервер, поэтому
-  // сайт открывается, даже когда публичные шлюзы TON Storage не отвечают.
-  async function bindSite(): Promise<void> {
+  async function checkDirect(): Promise<void> {
     try {
-      const { transaction } = await sitesApi.siteBind(siteId);
-      const result = await payment.pay(transaction, async () => ({ ok: true }));
-      if (result) toast(t("publish.bound"), "success");
-    } catch (error) {
-      toastError(error);
+      setDirectReady((await sitesApi.dnsStatus(siteId)).direct);
+    } catch {
+      setDirectReady(null);
     }
   }
 
@@ -397,18 +409,18 @@ export function PublishPage() {
             ) : null}
             {site.domain ? (
               <div style={{ marginTop: 12 }}>
-                <div className="card-sub" style={{ marginBottom: 6 }}>
-                  {t("publish.bindHint")}
-                </div>
-                <Button block onClick={() => void bindDns()}>
-                  🔗 {t("publish.bindDns")}
-                </Button>
-                <div className="card-sub" style={{ margin: "12px 0 6px" }}>
-                  {t("publish.bindSiteHint")}
-                </div>
-                <Button block variant="ghost" onClick={() => void bindSite()}>
-                  🌐 {t("publish.bindSite")}
-                </Button>
+                {directReady === true ? (
+                  <Notice kind="info">✅ {t("publish.domainReady")}</Notice>
+                ) : (
+                  <>
+                    <div className="card-sub" style={{ marginBottom: 6 }}>
+                      {t("publish.bindSiteHint")}
+                    </div>
+                    <Button block variant="primary" onClick={() => void bindSite()}>
+                      🌐 {t("publish.bindSite")}
+                    </Button>
+                  </>
+                )}
               </div>
             ) : null}
           </>

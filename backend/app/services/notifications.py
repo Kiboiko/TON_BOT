@@ -29,8 +29,8 @@ MESSAGES: dict[str, dict[str, str]] = {
         "en": "⚠️ Failed to publish site “{title}”.\nReason: {error}\nPlease try again or contact support.",
     },
     "dns_bind_required": {
-        "ru": "🔗 Сайт «{title}» загружен в TON Storage. Осталось подписать привязку домена в приложении.",
-        "en": "🔗 Site “{title}” is uploaded to TON Storage. One signature left to bind the domain.",
+        "ru": "🔗 Сайт «{title}» опубликован. Остался один шаг: направьте домен на сайт в приложении — это делается один раз.",
+        "en": "🔗 Site “{title}” is published. One step left: point the domain at it in the app — a one-time action.",
     },
     "subscription_activated": {
         "ru": "🎉 Подписка «{tariff}» активна{until}.",

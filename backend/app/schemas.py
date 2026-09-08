@@ -258,6 +258,15 @@ class DomainConfirmResponse(BaseModel):
     domain: str | None = None
 
 
+class DnsStatusResponse(BaseModel):
+    """Указывает ли домен на наш TON-сайт."""
+
+    domain: str | None = None
+    # None — проверить не удалось (сеть, индексатор): кнопку прячем только
+    # тогда, когда точно знаем, что запись уже стоит
+    direct: bool | None = None
+
+
 class PublishResponse(BaseModel):
     status: str
     job_id: str

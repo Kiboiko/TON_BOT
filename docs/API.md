@@ -73,7 +73,9 @@ payload → передаёт его в TON Connect как `tonProof` → при�
 | POST | `/api/sites/{id}/preview` | `{ preview_html }` |
 | POST | `/api/sites/{id}/publish` | `{ status: "publishing", job_id }` |
 | GET | `/api/sites/{id}/publish-status` | `{ status, storage_bag_id?, published_at?, error? }` |
-| POST | `/api/sites/{id}/dns-bind` | `{ transaction }` — **дополнение**, привязка bag id к домену |
+| POST | `/api/sites/{id}/site-bind` | `{ transaction }` — **дополнение**, направляет домен на наш TON-сайт |
+| GET | `/api/sites/{id}/dns-status` | `{ domain, direct }` — **дополнение**, направлен ли домен на сайт |
+| POST | `/api/sites/{id}/dns-bind` | `{ transaction }` — **дополнение**, привязка bag id к домену (не используется интерфейсом) |
 
 Публикация асинхронная: после `publish` опрашивайте `publish-status`, пока
 статус не станет `published` или `publish_error` (интервал ~2–3 с).
@@ -160,7 +162,13 @@ payload → передаёт его в TON Connect как `tonProof` → при�
 небезопасной или незавершённой:
 
 1. `GET /api/user/ton-proof-payload` — одноразовый nonce для ton_proof.
-3. `POST /api/sites/{id}/dns-bind` — транзакция привязки опубликованного контента
+3. `POST /api/sites/{id}/site-bind` — транзакция, направляющая домен на наш
+   TON-сайт. Подписывается один раз на домен: ADNL-адрес прокси не меняется от
+   публикации к публикации. Субдомены зоны платформы наследуют запись зоны, им
+   подпись не нужна вовсе — проверить можно через `GET /api/sites/{id}/dns-status`.
+
+   Привязка через TON Storage (`dns-bind`) осталась в API, но интерфейсом не
+   используется: публичные шлюзы бэги новых сайтов не отдают.
    к домену (её подписывает владелец домена, backend лишь собирает тело).
 4. `POST /api/uploads` и `GET /u/{имя}` — загрузка изображений из ТЗ (пункт B2)
    не имела эндпоинта в разделе 4.
