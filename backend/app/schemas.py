@@ -248,6 +248,9 @@ class ZoneDeployResponse(BaseModel):
 class DomainConfirmRequest(BaseModel):
     site_id: uuid.UUID
     tx_hash: str = Field(min_length=8, max_length=8192)
+    # домен, который пользователь только что оплатил: до подтверждения владения
+    # он нигде не сохранён, поэтому приходит от фронта и проверяется в сети
+    domain: str | None = None
 
 
 class DomainConfirmResponse(BaseModel):

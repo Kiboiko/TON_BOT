@@ -71,7 +71,10 @@ def build_set_storage_transaction(
 ) -> TransactionResponse:
     """Транзакция «привязать bag id к домену», готовая к подписи в TON Connect."""
     if not dns_item_address:
-        raise BadRequest("Site has no DNS item address", code="DNS_ITEM_MISSING")
+        raise BadRequest(
+            "Domain ownership is not confirmed yet: finish getting the domain first",
+            code="DNS_ITEM_MISSING",
+        )
     return TransactionResponse(
         valid_until=int(time.time()) + valid_for,
         messages=[
@@ -132,7 +135,10 @@ def build_set_site_transaction(
 ) -> TransactionResponse:
     """Транзакция «направить домен на наш TON-сайт», готовая к подписи."""
     if not dns_item_address:
-        raise BadRequest("Site has no DNS item address", code="DNS_ITEM_MISSING")
+        raise BadRequest(
+            "Domain ownership is not confirmed yet: finish getting the domain first",
+            code="DNS_ITEM_MISSING",
+        )
     if not adnl_address:
         raise BadRequest("TON Site is not configured on the server", code="TON_SITE_NOT_CONFIGURED")
     return TransactionResponse(

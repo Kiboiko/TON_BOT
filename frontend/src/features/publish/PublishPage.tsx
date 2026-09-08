@@ -131,12 +131,14 @@ export function PublishPage() {
 
   async function attachDomain(): Promise<void> {
     try {
-      const { transaction } = await domainsApi.claim({
+      const { transaction, domain } = await domainsApi.claim({
         site_id: siteId,
         name: name.trim().toLowerCase(),
       });
+      // домен закрепится за сайтом только после того, как backend увидит
+      // выпущенный субдомен в блокчейне, поэтому передаём его явно
       const result = await payment.pay(transaction, (txHash) =>
-        domainsApi.confirm({ site_id: siteId, tx_hash: txHash }),
+        domainsApi.confirm({ site_id: siteId, tx_hash: txHash, domain }),
       );
       if (result) {
         toast(t("domain.attached"), "success");

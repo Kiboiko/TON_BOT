@@ -153,18 +153,34 @@ async def test_full_cycle(client, ton, queue, notifier, domain_service, resolver
     assert claim.json()["transaction"]["messages"]
     assert ("start_auction", {"subdomain": "mysite"}) in domain_service.calls
 
+    # запрос транзакции ничего не присваивает: пользователь мог её и не подписать
+    not_yet = await client.get(f"/api/sites/{site_id}", headers=h)
+    assert not_yet.json()["site"]["domain"] is None
+
     # пока субдомена нет в сети — подтверждение отвечает pending
     pending = await client.post(
-        "/api/domains/confirm", headers=h, json={"site_id": site_id, "tx_hash": "boc-not-onchain"}
+        "/api/domains/confirm",
+        headers=h,
+        json={"site_id": site_id, "tx_hash": "boc-not-onchain", "domain": "mysite.tonsite.ton"},
     )
     assert pending.json()["status"] == "pending"
+    still_empty = await client.get(f"/api/sites/{site_id}", headers=h)
+    assert still_empty.json()["site"]["domain"] is None
 
     # субдомен появился и принадлежит кошельку пользователя
     resolver.own("mysite.tonsite.ton", wallet, item_address="0:" + "cc" * 32)
     confirmed = await client.post(
-        "/api/domains/confirm", headers=h, json={"site_id": site_id, "tx_hash": "boc-onchain"}
+        "/api/domains/confirm",
+        headers=h,
+        json={"site_id": site_id, "tx_hash": "boc-onchain", "domain": "mysite.tonsite.ton"},
     )
     assert confirmed.json()["status"] == "publishing"
+
+    # только теперь домен закреплён — и вместе с ним адрес DNS-item,
+    # без которого нечем подписать запись домена
+    bound = (await client.get(f"/api/sites/{site_id}", headers=h)).json()["site"]
+    assert bound["domain"] == "mysite.tonsite.ton"
+    assert bound["dns_item_address"] == "0:" + "cc" * 32
 
     # 7. публикация уже запущена подтверждением домена
     status = await client.get(f"/api/sites/{site_id}/publish-status", headers=h)

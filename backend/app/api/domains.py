@@ -102,12 +102,10 @@ async def claim_domain(
         # в proxy-зоне субдомен разыгрывается аукционом, как и домены верхнего уровня
         tx = await service.start_auction(zone.collection_address, name)
 
-    # домен запоминаем сразу: данные о сайте живут у нас, а не у сервиса
-    site.domain = domain
-    site.tld = zone.domain
-    site.collection_address = zone.collection_address
-    await session.flush()
-
+    # Домен НЕ сохраняем: транзакция ещё не подписана. Раньше он записывался
+    # здесь же, и сайт показывал «текущий домен» даже когда пользователь
+    # отменял оплату — а привязать такой домен было нечем, потому что DNS-item
+    # у него так и не появлялся. Владение подтверждает /domains/confirm.
     return DomainClaimResponse(
         transaction=TonConnectTransaction(**tx.to_tonconnect()), domain=domain
     )
@@ -169,15 +167,21 @@ async def confirm_domain(
     site = await session.get(Site, body.site_id)
     if site is None or site.user_id != user.id:
         raise NotFound("Site not found", code="SITE_NOT_FOUND")
-    if not site.domain:
+    domain = (body.domain or site.domain or "").strip().lower()
+    if not domain:
         raise BadRequest("No domain is attached to this site", code="DOMAIN_NOT_ATTACHED")
 
-    info = await get_resolver().resolve(site.domain)
+    info = await get_resolver().resolve(domain)
     owned = (not info.available) and (info.owner is None or same_address(info.owner, wallet))
     if not owned:
         # транзакция ещё не долетела до сети — фронт повторит опрос
-        return DomainConfirmResponse(status="pending", domain=site.domain)
+        return DomainConfirmResponse(status="pending", domain=domain)
 
+    zone = await get_zone(session)
+    site.domain = domain
+    site.tld = zone.domain if domain.endswith("." + zone.domain) else domain.split(".")[-1]
+    if domain.endswith("." + zone.domain):
+        site.collection_address = zone.collection_address
     if info.item_address:
         site.dns_item_address = info.item_address
     # если предыдущая задача потерялась, сайт так и висит в publishing —
@@ -185,4 +189,4 @@ async def confirm_domain(
     # бесконечный поллинг
     if site.status != SiteStatus.publishing or publish_is_stale(site):
         await enqueue_publish(session, site)
-    return DomainConfirmResponse(status=SiteStatus.publishing.value, domain=site.domain)
+    return DomainConfirmResponse(status=SiteStatus.publishing.value, domain=domain)

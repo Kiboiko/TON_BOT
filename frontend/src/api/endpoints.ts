@@ -80,7 +80,7 @@ export const domainsApi = {
       "/domains/attach",
       body,
     ),
-  confirm: (body: { site_id: string; tx_hash: string }) =>
+  confirm: (body: { site_id: string; tx_hash: string; domain?: string }) =>
     api.post<{ status: string; domain: string | null }>("/domains/confirm", body),
 };
 
