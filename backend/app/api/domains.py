@@ -171,13 +171,25 @@ async def confirm_domain(
     if not domain:
         raise BadRequest("No domain is attached to this site", code="DOMAIN_NOT_ATTACHED")
 
-    info = await get_resolver().resolve(domain)
+    zone = await get_zone(session)
+    resolver = get_resolver()
+    in_zone = bool(zone.domain) and domain.endswith("." + zone.domain)
+
+    info = None
+    if in_zone and zone.collection_address:
+        # для субдоменов зоны владение определяется по NFT в коллекции:
+        # DNS-индекс их не знает и отвечает «свободно» даже после оплаты
+        info = await resolver.find_subdomain(
+            zone.collection_address, domain.split(".", 1)[0], wallet
+        )
+    if info is None:
+        info = await resolver.resolve(domain)
+
     owned = (not info.available) and (info.owner is None or same_address(info.owner, wallet))
     if not owned:
         # транзакция ещё не долетела до сети — фронт повторит опрос
         return DomainConfirmResponse(status="pending", domain=domain)
 
-    zone = await get_zone(session)
     site.domain = domain
     site.tld = zone.domain if domain.endswith("." + zone.domain) else domain.split(".")[-1]
     if domain.endswith("." + zone.domain):

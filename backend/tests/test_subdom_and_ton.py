@@ -9,7 +9,12 @@ import httpx
 import pytest
 from nacl.signing import SigningKey
 
+from sqlalchemy import select
+
+from app.core.db import SessionLocal
 from app.core.errors import SubdomError
+from app.models import User
+from app.services.zone import set_zone
 from app.services.subdom_client import DomainService, FakeDomainService, SubdomHttpClient
 from app.services.ton import (
     MockTonClient,
@@ -455,3 +460,70 @@ async def test_site_bind_needs_published_site(client):
     resp = await client.post(f"/api/sites/{site_id}/site-bind", headers=h)
     assert resp.status_code == 400
     assert resp.json()["error"]["code"] == "SITE_NOT_PUBLISHED"
+
+
+async def test_subdomain_confirmed_via_collection_when_dns_index_blind(client, resolver):
+    """Оплаченный субдомен подтверждается, даже если DNS-индекс его не видит.
+
+    tonapi не индексирует субдомены сторонних коллекций: свежий субдомен там
+    отвечает 404 и выглядит свободным, хотя NFT уже выпущен и оплачен. Раньше
+    из-за этого подтверждение вечно отвечало pending, домен не закреплялся, а
+    вместе с ним не появлялся адрес DNS-item — и привязать домен было нечем.
+    """
+    from tests.conftest import headers_for
+
+    h = headers_for(7801)
+    await client.post("/api/user/auth", headers=h, json={})
+    wallet = "0:" + "7" * 64
+    async with SessionLocal() as session:
+        user = await session.scalar(select(User).where(User.telegram_id == 7801))
+        user.wallet_address = wallet
+        await session.commit()
+        await set_zone(
+            session,
+            domain="tonsite.ton",
+            dns_item_address="0:" + "ab" * 32,
+            collection_address="0:" + "cd" * 32,
+            mode="sbt",
+        )
+        await session.commit()
+
+    site_id = (
+        await client.post("/api/sites", headers=h, json={"type": "visitka", "title": "S"})
+    ).json()["site"]["id"]
+
+    claim = await client.post(
+        "/api/domains/claim", headers=h, json={"site_id": site_id, "name": "shop"}
+    )
+    assert claim.status_code == 200, claim.text
+
+    # NFT выпущен и принадлежит пользователю, но DNS-индекс его «не видит»
+    resolver.own("shop.tonsite.ton", wallet, item_address="0:" + "ef" * 32)
+    resolver.dns_index_blind = True
+
+    confirmed = await client.post(
+        "/api/domains/confirm",
+        headers=h,
+        json={"site_id": site_id, "tx_hash": "boc-onchain", "domain": "shop.tonsite.ton"},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["status"] == "publishing"
+
+    site = (await client.get(f"/api/sites/{site_id}", headers=h)).json()["site"]
+    assert site["domain"] == "shop.tonsite.ton"
+    assert site["dns_item_address"] == "0:" + "ef" * 32
+
+
+def test_real_resolver_implements_full_interface():
+    """Боевой резолвер обязан уметь всё, что объявлено в интерфейсе.
+
+    Тесты гоняют заглушку, поэтому метод, забытый в TonApiResolver, всплыл бы
+    только на боевом — как и случилось с find_subdomain.
+    """
+    from app.services.dns_resolver import DomainResolver, FakeResolver, TonApiResolver
+
+    required = [n for n in dir(DomainResolver) if not n.startswith("_")]
+    assert required, "интерфейс не должен быть пустым"
+    for impl in (TonApiResolver, FakeResolver):
+        missing = [n for n in required if not callable(getattr(impl, n, None))]
+        assert not missing, f"{impl.__name__} не реализует: {missing}"

@@ -38,6 +38,10 @@ def is_valid_name(name: str) -> bool:
 class DomainResolver(Protocol):
     async def resolve(self, domain: str) -> DomainInfo: ...
 
+    async def find_subdomain(
+        self, collection_address: str, name: str, owner: str
+    ) -> DomainInfo | None: ...
+
     async def contract_deployed(self, address: str) -> bool | None: ...
 
     async def close(self) -> None: ...
@@ -70,6 +74,12 @@ class TonApiResolver:
             return DomainInfo(domain=domain, available=False, status="unknown")
 
         if resp.status_code == 404:
+            # Свежий субдомен сторонней коллекции в DNS-индексе не появляется,
+            # хотя NFT уже выпущен. Отличить его от свободного имени можно по
+            # резолву: у выпущенного цепочка доходит до коллекции и возвращает
+            # пустой набор записей, у свободного — обрывается раньше.
+            if await self._resolves(domain):
+                return DomainInfo(domain=domain, available=False, status="taken")
             return DomainInfo(domain=domain, available=True, status="free")
         if resp.status_code >= 400:
             log.warning("dns resolve %s -> %s", domain, resp.status_code)
@@ -90,6 +100,67 @@ class TonApiResolver:
             owner=owner,
             expires_at=data.get("expiring_at"),
         )
+
+    async def _resolves(self, domain: str) -> bool:
+        """Доходит ли цепочка резолверов до имени (пусть и без записей)."""
+        client = await self._get_client()
+        try:
+            resp = await client.get(f"/v2/dns/{domain}/resolve")
+        except (httpx.TimeoutException, httpx.TransportError):
+            return False
+        if resp.status_code < 400:
+            return True
+        try:
+            message = str((resp.json() or {}).get("error") or "")
+        except ValueError:
+            return False
+        # «entity not found» — имени нет вовсе; любой другой ответ означает,
+        # что резолвер имя нашёл
+        return "not found" not in message.lower()
+
+    async def find_subdomain(
+        self, collection_address: str, name: str, owner: str
+    ) -> DomainInfo | None:
+        """Ищет субдомен среди NFT владельца в коллекции зоны.
+
+        Владение проверяется по самим токенам, а не по DNS-индексу: индекс
+        субдомены сторонних коллекций не покрывает и отвечает 404 даже тогда,
+        когда NFT уже выпущен и оплачен.
+        """
+        if not collection_address or not owner:
+            return None
+        client = await self._get_client()
+        try:
+            resp = await client.get(
+                f"/v2/accounts/{owner}/nfts",
+                params={"collection": collection_address, "limit": 200},
+            )
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            log.warning("subdomain lookup %s failed: %s", name, exc)
+            return None
+        if resp.status_code >= 400:
+            log.warning("subdomain lookup %s -> %s", name, resp.status_code)
+            return None
+        try:
+            items = (resp.json() or {}).get("nft_items") or []
+        except ValueError:
+            return None
+
+        wanted = name.strip().lower()
+        for item in items:
+            title = str(((item.get("metadata") or {}).get("name") or "")).strip().lower()
+            # subdom пишет в имя всю цепочку (и даже дублирует tld),
+            # поэтому сверяем только первую метку
+            if title.split(".", 1)[0] != wanted:
+                continue
+            return DomainInfo(
+                domain=title,
+                available=False,
+                status="taken",
+                item_address=item.get("address"),
+                owner=((item.get("owner") or {}).get("address")) or owner,
+            )
+        return None
 
     async def contract_deployed(self, address: str) -> bool | None:
         """Есть ли контракт по адресу. None — проверить не удалось.
@@ -131,6 +202,8 @@ class FakeResolver:
         # контракты: адрес -> есть ли он в сети. По умолчанию считаем, что есть,
         # а тесты про неразвёрнутую зону выставляют False явно
         self.deployed: dict[str, bool | None] = {}
+        # имитация tonapi: DNS-индекс не знает субдоменов сторонних коллекций
+        self.dns_index_blind = False
 
     def own(self, domain: str, owner: str, item_address: str | None = None) -> None:
         self.owned[domain.strip().lower()] = owner
@@ -140,7 +213,7 @@ class FakeResolver:
     async def resolve(self, domain: str) -> DomainInfo:
         domain = domain.strip().lower()
         self.calls.append(domain)
-        if domain in self.owned:
+        if domain in self.owned and not self.dns_index_blind:
             return DomainInfo(
                 domain=domain,
                 available=False,
@@ -155,6 +228,20 @@ class FakeResolver:
             status="taken" if taken else "free",
             item_address=self.FAKE_ITEM if taken else None,
             owner=self.FAKE_ITEM if taken else None,
+        )
+
+    async def find_subdomain(
+        self, collection_address: str, name: str, owner: str
+    ) -> DomainInfo | None:
+        domain = next((d for d in self.owned if d.split(".", 1)[0] == name.lower()), None)
+        if domain is None:
+            return None
+        return DomainInfo(
+            domain=domain,
+            available=False,
+            status="taken",
+            item_address=self.FAKE_ITEM,
+            owner=self.owned[domain],
         )
 
     async def contract_deployed(self, address: str) -> bool | None:
