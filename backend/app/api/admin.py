@@ -28,6 +28,8 @@ from app.models import (
     utcnow,
 )
 from app.schemas import (
+    AboutOut,
+    AboutUpdateRequest,
     AdminDomainItem,
     AdminStatsResponse,
     AdminUserDetail,
@@ -54,6 +56,8 @@ from app.services import notifications
 from app.services import subscriptions as subs_service
 from app.services.dns_resolver import get_resolver
 from app.services.subdom_client import get_domain_service
+from app.services.about import get_about, set_about
+from app.services.renderer import safe_url
 from app.services.zone import get_zone, set_zone
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -336,6 +340,29 @@ async def list_domains(session: SessionDep, admin: AdminUser) -> list[AdminDomai
         )
         for site, user in rows.all()
     ]
+
+
+# --------------------------------------------------------------- об авторе
+@router.get("/about", response_model=AboutOut)
+async def about_config(session: SessionDep, admin: AdminUser) -> AboutOut:
+    return AboutOut(**(await get_about(session)).as_dict())
+
+
+@router.patch("/about", response_model=AboutOut)
+async def update_about(
+    session: SessionDep, admin: AdminUser, body: AboutUpdateRequest
+) -> AboutOut:
+    """Текст блока «Об авторе» и ссылка на страницу автора."""
+    if body.link_url and not safe_url(body.link_url):
+        raise BadRequest("Link must be a valid http(s), tg or mailto URL", code="INVALID_URL")
+    about = await set_about(
+        session,
+        title=body.title,
+        text=body.text,
+        link_url=body.link_url,
+        link_label=body.link_label,
+    )
+    return AboutOut(**about.as_dict())
 
 
 # --------------------------------------------------------------------- зона

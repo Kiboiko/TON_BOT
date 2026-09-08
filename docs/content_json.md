@@ -66,7 +66,7 @@
 | `hero` | `title`, `subtitle`, `image` | все шаблоны |
 | `text` (алиас `about`) | `title`, `text` | визитка, портфолио, TON-проект |
 | `links` | `items[]`: `title`, `url`, `subtitle?`, `icon?` | ссылки, TON-проект |
-| `buttons` | `items[]`: `title`, `url`, `style: "primary"\|"secondary"` | визитка |
+| `buttons` | `items[]`: `title`, `url`, `style: "primary"\|"secondary"\|"outline"`, `size: "sm"\|"md"\|"lg"`, `color: accent\|dark\|light\|green\|red\|orange\|purple\|pink` | визитка |
 | `socials` | `items[]`: `network`, `url`, `icon?` | визитка, ссылки |
 | `contacts` | `items[]`: `label`, `value`, `url?` | все |
 | `features` (алиас `advantages`) | `title?`, `items[]`: `icon?`, `title`, `text` | лендинг |
@@ -119,7 +119,7 @@ Backend создаёт этот скелет, если `POST /api/sites` при�
         "title": "Ирина Ветрова", "subtitle": "Дизайнер интерфейсов\n8 лет в продуктовом дизайне",
         "image": "https://cdn.example.com/ira.jpg" } },
     { "id": "b2", "type": "buttons", "props": { "items": [
-        { "title": "Написать в Telegram", "url": "https://t.me/ira", "style": "primary" },
+        { "title": "Написать в Telegram", "url": "https://t.me/ira", "style": "primary", "size": "lg", "color": "green" },
         { "title": "Посмотреть портфолио", "url": "https://ira.design", "style": "secondary" } ] } },
     { "id": "b3", "type": "socials", "props": { "items": [
         { "network": "Telegram", "icon": "✈️", "url": "https://t.me/ira" },

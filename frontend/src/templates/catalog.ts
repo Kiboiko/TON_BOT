@@ -14,7 +14,7 @@ export interface FieldSpec {
   label: { ru: string; en: string };
   kind: FieldKind;
   placeholder?: string;
-  options?: { value: string; label: string }[];
+  options?: { value: string; label: { ru: string; en: string } }[];
 }
 
 export interface BlockSpec {
@@ -84,8 +84,34 @@ export const BLOCK_CATALOG: BlockSpec[] = [
         label: { ru: "Стиль", en: "Style" },
         kind: "select",
         options: [
-          { value: "primary", label: "Основная" },
-          { value: "secondary", label: "Второстепенная" },
+          { value: "primary", label: { ru: "Заливка", en: "Filled" } },
+          { value: "secondary", label: { ru: "Спокойная", en: "Soft" } },
+          { value: "outline", label: { ru: "Контур", en: "Outline" } },
+        ],
+      },
+      {
+        key: "size",
+        label: { ru: "Размер", en: "Size" },
+        kind: "select",
+        options: [
+          { value: "md", label: { ru: "Обычный", en: "Medium" } },
+          { value: "sm", label: { ru: "Маленький", en: "Small" } },
+          { value: "lg", label: { ru: "Крупный", en: "Large" } },
+        ],
+      },
+      {
+        key: "color",
+        label: { ru: "Цвет", en: "Colour" },
+        kind: "select",
+        options: [
+          { value: "accent", label: { ru: "Акцент сайта", en: "Site accent" } },
+          { value: "dark", label: { ru: "Тёмный", en: "Dark" } },
+          { value: "light", label: { ru: "Светлый", en: "Light" } },
+          { value: "green", label: { ru: "Зелёный", en: "Green" } },
+          { value: "red", label: { ru: "Красный", en: "Red" } },
+          { value: "orange", label: { ru: "Оранжевый", en: "Orange" } },
+          { value: "purple", label: { ru: "Фиолетовый", en: "Purple" } },
+          { value: "pink", label: { ru: "Розовый", en: "Pink" } },
         ],
       },
     ],
@@ -308,11 +334,22 @@ export function blockId(): string {
   return `b${Math.random().toString(36).slice(2, 9)}`;
 }
 
-/** Пустой блок нужного типа с преднастроенными демо-полями. */
+/** Значения по умолчанию для новой строки блока-списка. */
+export const ITEM_DEFAULTS: Partial<Record<BlockType, Record<string, unknown>>> = {
+  buttons: { style: "primary", size: "md", color: "accent" },
+};
+
+/**
+ * Пустой блок нужного типа.
+ *
+ * У блока-списка сразу заводим одну строку: с пустым `items` блок ничего не
+ * рендерил, и добавленные ссылки выглядели так, будто конструктор их потерял —
+ * на месте блока оставалась пустота.
+ */
 export function createBlock(type: BlockType, title = ""): Block {
   const spec = BLOCK_SPECS[type];
   const props: Record<string, unknown> = {};
-  if (spec?.itemFields) props.items = [];
+  if (spec?.itemFields) props.items = [{ ...(ITEM_DEFAULTS[type] ?? {}) }];
   if (type === "hero") {
     props.title = title || "";
     props.subtitle = "";

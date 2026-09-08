@@ -5,6 +5,7 @@
  * просим TON Connect подписать его и отправляем доказательство на backend.
  */
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTonConnectUI, useTonWallet } from "@tonconnect/ui-react";
 import { useTranslation } from "react-i18next";
 import { isMockEnabled } from "../../api/client";
@@ -16,6 +17,7 @@ import { useAppStore } from "../../store/app";
 
 export function SettingsPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [tonConnectUI] = useTonConnectUI();
   const wallet = useTonWallet();
 
@@ -163,16 +165,23 @@ export function SettingsPage() {
         />
       </div>
 
-      <div className="card">
+      <div className="card clickable" onClick={() => navigate("/about")}>
         <div className="card-row">
           <div className="grow">
             <div className="card-title">{t("settings.about")}</div>
-            <div className="card-sub">TON Site Builder · {t("settings.version")} 1.0.0</div>
+            <div className="card-sub">{t("about.hint")}</div>
           </div>
-          {isMockEnabled() ? <Badge kind="warning">{t("auth.mockBadge")}</Badge> : null}
+          <span className="card-sub">›</span>
         </div>
-        {isMockEnabled() ? (
-          <div style={{ marginTop: 10 }}>
+      </div>
+
+      {isMockEnabled() ? (
+        <div className="card">
+          <div className="card-row">
+            <div className="grow">
+              <div className="card-title">{t("auth.mockBadge")}</div>
+              <div className="card-sub">TON Site Builder · {t("settings.version")} 1.0.0</div>
+            </div>
             <Button
               size="sm"
               variant="danger"
@@ -184,8 +193,8 @@ export function SettingsPage() {
               {t("settings.resetDemo")}
             </Button>
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }

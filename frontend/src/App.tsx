@@ -1,11 +1,12 @@
 /** Каркас приложения: авторизация, тема, роутинг, нижняя навигация. */
 import type { ReactNode } from "react";
-import { useEffect } from "react";
-import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { useEffect, useRef } from "react";
+import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { isMockEnabled } from "./api/client";
 import { GramIcon } from "./components/GramIcon";
 import { Button, Loading, Toasts } from "./components/ui";
+import { AboutPage } from "./features/about/AboutPage";
 import { AdminPage } from "./features/admin/AdminPage";
 import { CustomCodePage } from "./features/editor/CustomCodePage";
 import { EditorPage } from "./features/editor/EditorPage";
@@ -55,18 +56,31 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (loading) return <Loading text={t("auth.connecting")} />;
+  // экраны до авторизации живут в том же каркасе: body больше не прокручивается
+  // сам, и без .app-scroll длинный текст ошибки было бы не пролистать
+  if (loading)
+    return (
+      <div className="app">
+        <div className="app-scroll">
+          <Loading text={t("auth.connecting")} />
+        </div>
+      </div>
+    );
 
   if (!user) {
     return (
-      <div className="page">
-        <div className="empty">
-          <div className="empty-icon">🔌</div>
-          <div className="card-title">{t("auth.failed")}</div>
-          <div className="card-sub">{authError}</div>
-          <Button variant="primary" onClick={() => void auth().catch(() => undefined)}>
-            {t("common.retry")}
-          </Button>
+      <div className="app">
+        <div className="app-scroll">
+          <div className="page">
+            <div className="empty">
+              <div className="empty-icon">🔌</div>
+              <div className="card-title">{t("auth.failed")}</div>
+              <div className="card-sub">{authError}</div>
+              <Button variant="primary" onClick={() => void auth().catch(() => undefined)}>
+                {t("common.retry")}
+              </Button>
+            </div>
+          </div>
         </div>
         <Toasts />
       </div>
@@ -75,29 +89,53 @@ export function App() {
 
   return (
     <div className="app">
-      {isMockEnabled() && !isTelegram() ? (
-        <div className="notice notice-warning" style={{ margin: 12 }}>
-          <span>🧪</span>
-          <div>{t("auth.outsideTelegram")}</div>
-        </div>
-      ) : null}
+      <AppScroll>
+        {isMockEnabled() && !isTelegram() ? (
+          <div className="notice notice-warning" style={{ margin: 12 }}>
+            <span>🧪</span>
+            <div>{t("auth.outsideTelegram")}</div>
+          </div>
+        ) : null}
 
-      <Routes>
-        <Route path="/" element={<Navigate to="/sites" replace />} />
-        <Route path="/sites" element={<SitesPage />} />
-        <Route path="/sites/:siteId" element={<EditorPage />} />
-        <Route path="/sites/:siteId/preview" element={<PreviewPage />} />
-        <Route path="/sites/:siteId/publish" element={<PublishPage />} />
-        <Route path="/sites/:siteId/custom-code" element={<CustomCodePage />} />
-        <Route path="/tariffs" element={<TariffsPage />} />
-        <Route path="/subscriptions" element={<SubscriptionsPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/admin" element={<AdminPage />} />
-        <Route path="*" element={<Navigate to="/sites" replace />} />
-      </Routes>
+        <Routes>
+          <Route path="/" element={<Navigate to="/sites" replace />} />
+          <Route path="/sites" element={<SitesPage />} />
+          <Route path="/sites/:siteId" element={<EditorPage />} />
+          <Route path="/sites/:siteId/preview" element={<PreviewPage />} />
+          <Route path="/sites/:siteId/publish" element={<PublishPage />} />
+          <Route path="/sites/:siteId/custom-code" element={<CustomCodePage />} />
+          <Route path="/tariffs" element={<TariffsPage />} />
+          <Route path="/subscriptions" element={<SubscriptionsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/admin" element={<AdminPage />} />
+          <Route path="*" element={<Navigate to="/sites" replace />} />
+        </Routes>
+      </AppScroll>
 
       <TabBar />
       <Toasts />
+    </div>
+  );
+}
+
+/**
+ * Единственная прокручиваемая область приложения.
+ *
+ * Новый экран всегда открывается сверху: без сброса позиции переход с длинного
+ * списка выглядел так, будто страница загрузилась пустой и «прыгает».
+ */
+function AppScroll({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    ref.current?.scrollTo({ top: 0 });
+  }, [pathname]);
+
+  return (
+    <div className="app-scroll" ref={ref}>
+      {children}
     </div>
   );
 }

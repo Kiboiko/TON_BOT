@@ -161,6 +161,37 @@ def _block_links(p: dict[str, Any]) -> Markup:
     return Markup('<section class="block links">{}{}</section>').format(head, Markup("").join(rows))
 
 
+# Палитра кнопок: фиксированный список, а не свободный ввод цвета. Значение
+# уходит в inline-style готовой страницы, и произвольная строка оттуда позволила
+# бы дописать свой CSS. Совпадает с BUTTON_COLORS во фронтовом render.ts.
+BUTTON_COLORS: dict[str, tuple[str, str]] = {
+    "accent": ("var(--accent)", "#ffffff"),
+    "dark": ("#111827", "#ffffff"),
+    "light": ("#ffffff", "#111827"),
+    "green": ("#12b981", "#ffffff"),
+    "red": ("#e5484d", "#ffffff"),
+    "orange": ("#f59e0b", "#231a05"),
+    "purple": ("#7c5cff", "#ffffff"),
+    "pink": ("#ff5c8a", "#ffffff"),
+}
+BUTTON_STYLES = {"primary", "secondary", "outline"}
+BUTTON_SIZES = {"sm": "btn-s", "md": "", "lg": "btn-l"}
+
+
+def _button_class(item: dict[str, Any]) -> str:
+    style = item.get("style") if item.get("style") in BUTTON_STYLES else "primary"
+    size = BUTTON_SIZES.get(str(item.get("size") or "md"), "")
+    return f"btn btn-{style} {size}".strip()
+
+
+def _button_style(item: dict[str, Any]) -> Markup:
+    name = str(item.get("color") or "accent")
+    color = BUTTON_COLORS.get(name)
+    if color is None or name == "accent":
+        return Markup("")
+    return Markup(' style="--btn-bg:{};--btn-fg:{}"').format(color[0], color[1])
+
+
 def _block_buttons(p: dict[str, Any]) -> Markup:
     items = p.get("items") or p.get("buttons") or []
     btns: list[Markup] = []
@@ -170,10 +201,9 @@ def _block_buttons(p: dict[str, Any]) -> Markup:
         url = safe_url(item.get("url"))
         if not url:
             continue
-        style = "btn-secondary" if item.get("style") == "secondary" else "btn-primary"
         btns.append(
-            Markup('<a class="btn {}" href="{}" target="_blank" rel="noopener noreferrer">{}</a>').format(
-                style, url, _txt(item.get("title") or "Открыть")
+            Markup('<a class="{}"{} href="{}" target="_blank" rel="noopener noreferrer">{}</a>').format(
+                _button_class(item), _button_style(item), url, _txt(item.get("title") or "Открыть")
             )
         )
     if not btns:
@@ -428,10 +458,13 @@ a{color:var(--accent)}
 .link-sub{display:block;font-size:13px;color:var(--muted)}
 .buttons{display:flex;flex-direction:column;gap:10px}
 .btn{display:block;text-align:center;padding:14px 18px;border-radius:14px;font-weight:600;
-  text-decoration:none;transition:opacity .15s ease}
+  text-decoration:none;font-size:16px;border:2px solid transparent;transition:opacity .15s ease}
 .btn:hover{opacity:.88}
-.btn-primary{background:var(--accent);color:#fff}
-.btn-secondary{background:var(--surface);color:var(--text);border:1px solid rgba(127,127,127,.25)}
+.btn-s{padding:10px 14px;font-size:14px;border-radius:11px}
+.btn-l{padding:19px 22px;font-size:19px;border-radius:17px}
+.btn-primary{background:var(--btn-bg,var(--accent));color:var(--btn-fg,#fff)}
+.btn-secondary{background:var(--surface);color:var(--text);border-color:rgba(127,127,127,.25)}
+.btn-outline{background:transparent;color:var(--btn-bg,var(--accent));border-color:var(--btn-bg,var(--accent))}
 .socials{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
 .social{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;
   background:var(--surface);text-decoration:none;font-size:18px}
@@ -617,6 +650,12 @@ def _is_safe_css_bg(value: str) -> bool:
     return bool(re.fullmatch(r"[#\w\s(),.%-]+", value))
 
 
+# Заготовка первой строки блока-списка. Повторяет ITEM_DEFAULTS из catalog.ts.
+ITEM_DEFAULTS: dict[str, dict[str, Any]] = {
+    "buttons": {"style": "primary", "size": "md", "color": "accent"},
+}
+
+
 def default_content_for(site_type: str, title: str = "") -> dict[str, Any]:
     """Скелет content_json для нового сайта — общая точка соглашения A и B."""
     blocks = []
@@ -625,7 +664,9 @@ def default_content_for(site_type: str, title: str = "") -> dict[str, Any]:
         if btype == "hero":
             props = {"title": title or "Название", "subtitle": "", "image": ""}
         elif btype in {"links", "buttons", "socials", "features", "gallery", "schedule", "contacts"}:
-            props = {"items": []}
+            # одна пустая строка сразу: пустой список ничего не рендерит, и в
+            # конструкторе такой блок выглядит потерявшимся
+            props = {"items": [dict(ITEM_DEFAULTS.get(btype, {}))]}
         blocks.append({"id": btype, "type": btype, "props": props})
     return {
         "version": 1,

@@ -8,7 +8,7 @@ import { uploadsApi } from "../../api/endpoints";
 import type { Block } from "../../api/types";
 import { Button, Field, Input, Select, Textarea } from "../../components/ui";
 import { useAppStore } from "../../store/app";
-import { BLOCK_SPECS, type FieldSpec } from "../../templates/catalog";
+import { BLOCK_SPECS, ITEM_DEFAULTS, type FieldSpec } from "../../templates/catalog";
 import { haptic } from "../../telegram/webapp";
 
 type Lang = "ru" | "en";
@@ -40,7 +40,7 @@ function FieldInput({
         <Select
           value={stringValue || (spec.options?.[0]?.value ?? "")}
           onChange={onChange}
-          options={spec.options ?? []}
+          options={(spec.options ?? []).map((o) => ({ value: o.value, label: o.label[lang] }))}
         />
       </Field>
     );
@@ -211,7 +211,7 @@ export function BlockEditor({
             block
             onClick={() => {
               haptic.light();
-              setItems([...items, {}]);
+              setItems([...items, { ...(ITEM_DEFAULTS[block.type] ?? {}) }]);
             }}
           >
             + {t("editor.addItem", { label: spec.itemLabel?.[lang] ?? "" })}

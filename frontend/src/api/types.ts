@@ -153,6 +153,14 @@ export interface Zone {
   deployable: boolean;
 }
 
+/** Блок «Об авторе проекта»: текст и ссылка задаются в админке. */
+export interface About {
+  title: string;
+  text: string;
+  link_url: string;
+  link_label: string;
+}
+
 export interface Tariff {
   id: string;
   name: string;

@@ -141,3 +141,26 @@ describe("автосохранение при удалённом сайте", ()
     expect(useEditorStore.getState().content).toBeNull();
   });
 });
+
+describe("новый блок", () => {
+  beforeEach(() => {
+    useEditorStore.getState().reset();
+    useEditorStore.getState().load(site);
+  });
+
+  it("списки заводятся с одной строкой, а не пустыми", () => {
+    // пустой список ничего не рендерит: без строки добавленный блок ссылок
+    // пропадал из предпросмотра, и казалось, что он не добавился
+    const state = useEditorStore.getState();
+    state.addBlock("links");
+    const added = useEditorStore.getState().content!.blocks.at(-1)!;
+    expect(added.type).toBe("links");
+    expect(added.props.items).toEqual([{}]);
+  });
+
+  it("у кнопки сразу проставлены стиль, размер и цвет", () => {
+    useEditorStore.getState().addBlock("buttons");
+    const added = useEditorStore.getState().content!.blocks.at(-1)!;
+    expect(added.props.items).toEqual([{ style: "primary", size: "md", color: "accent" }]);
+  });
+});

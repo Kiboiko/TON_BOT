@@ -140,7 +140,13 @@ export function SitesPage() {
                 </div>
                 <Badge kind={STATUS_KIND[site.status]}>{t(`sites.status.${site.status}`)}</Badge>
               </div>
-              <div className="row" style={{ marginTop: 10 }}>
+              {/* карточка сама по себе кликабельна: без остановки всплытия
+                  «Удалить» заодно открывало редактор удаляемого сайта */}
+              <div
+                className="row"
+                style={{ marginTop: 10 }}
+                onClick={(event) => event.stopPropagation()}
+              >
                 <Button size="sm" onClick={() => navigate(`/sites/${site.id}`)}>
                   {t("common.edit")}
                 </Button>

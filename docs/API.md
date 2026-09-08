@@ -55,6 +55,7 @@ Backend проверяет HMAC-подпись initData по bot token и её �
 | POST | `/api/user/connect-wallet` | `{ success, wallet_address }` |
 | PATCH | `/api/user/settings` | `{ success }` |
 | GET | `/api/user/me` | `{ user }` |
+| GET | `/api/about` | `{ title, text, link_url, link_label }` — блок «Об авторе проекта» из ТЗ |
 
 **Про `ton-proof-payload`.** В ТЗ его нет, но без серверного одноразового nonce
 подпись кошелька можно переиспользовать. Порядок такой: фронт запрашивает
@@ -147,6 +148,8 @@ payload → передаёт его в TON Connect как `tonProof` → при�
 | GET | `/api/admin/zone` | `{ domain, dns_item_address, collection_address, mode, configured, deployable }` |
 | PATCH | `/api/admin/zone` | `{ ...zone }` — настройка домена платформы и адреса коллекции |
 | POST | `/api/admin/zone/deploy` | `{ transaction, domain }` — разовый разворот зоны, подписывает владелец домена |
+| GET | `/api/admin/about` | `{ title, text, link_url, link_label }` — блок «Об авторе проекта» |
+| PATCH | `/api/admin/about` | `{ ...about }` — текст и ссылка автора, их видят пользователи |
 | GET | `/api/admin/stats` | `{ total_users, total_sites, published_sites, active_subscriptions, revenue, revenue_last_30d, payments_confirmed }` |
 | GET | `/api/admin/actions` | журнал действий админов (аудит) |
 

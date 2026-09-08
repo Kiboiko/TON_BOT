@@ -1,6 +1,7 @@
 /** Обёртки над эндпоинтами раздела 4 ТЗ — ровно те пути, что реализует backend. */
 import { api, uploadFile } from "./client";
 import type {
+  About,
   AdminDomainItem,
   AdminStats,
   AdminUserDetail,
@@ -41,6 +42,11 @@ export const userApi = {
   }) => api.post<{ success: boolean; wallet_address: string }>("/user/connect-wallet", body),
   updateSettings: (body: { language?: Language; theme?: Theme }) =>
     api.patch<{ success: boolean }>("/user/settings", body),
+};
+
+// --- об авторе проекта ---
+export const aboutApi = {
+  get: () => api.get<About>("/about"),
 };
 
 // --- сайты ---
@@ -148,4 +154,7 @@ export const adminApi = {
       collection_address: string | null;
     }>("/admin/zone/deploy"),
   stats: () => api.get<AdminStats>("/admin/stats"),
+
+  about: () => api.get<About>("/admin/about"),
+  updateAbout: (body: Partial<About>) => api.patch<About>("/admin/about", body),
 };

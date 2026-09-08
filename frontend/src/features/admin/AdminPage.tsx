@@ -7,6 +7,7 @@ import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { adminApi } from "../../api/endpoints";
 import type {
+  About,
   AdminDomainItem,
   Zone,
   AdminStats,
@@ -29,12 +30,13 @@ import {
   Select,
   Sheet,
   Skeletons,
+  Textarea,
 } from "../../components/ui";
 import { useTonPayment } from "../payments/useTonPayment";
 import { useAppStore } from "../../store/app";
 import { showConfirm } from "../../telegram/webapp";
 
-type Tab = "stats" | "users" | "tariffs" | "domains" | "zone";
+type Tab = "stats" | "users" | "tariffs" | "domains" | "zone" | "about";
 
 const DURATIONS: TariffDuration[] = ["month", "3month", "6month", "12month", "forever"];
 const KINDS: TariffKind[] = ["base", "pro"];
@@ -62,6 +64,7 @@ export function AdminPage() {
           { value: "tariffs", label: t("admin.tabs.tariffs") },
           { value: "domains", label: t("admin.tabs.domains") },
           { value: "zone", label: t("admin.tabs.zone") },
+          { value: "about", label: t("admin.tabs.about") },
         ]}
       />
 
@@ -70,6 +73,7 @@ export function AdminPage() {
       {tab === "tariffs" ? <TariffsTab /> : null}
       {tab === "domains" ? <DomainsTab /> : null}
       {tab === "zone" ? <ZoneTab /> : null}
+      {tab === "about" ? <AboutTab /> : null}
     </div>
   );
 }
@@ -650,6 +654,76 @@ function ZoneTab() {
         🚀 {t("admin.zone.deploy")}
       </Button>
       <div className="card-sub">{t("admin.zone.deployHint")}</div>
+    </>
+  );
+}
+
+/** Блок «Об авторе проекта»: текст и ссылка, которые видит пользователь. */
+function AboutTab() {
+  const { t } = useTranslation();
+  const toast = useAppStore((s) => s.toast);
+  const toastError = useAppStore((s) => s.toastError);
+  const [about, setAbout] = useState<About | null>(null);
+  const [form, setForm] = useState<About>({ title: "", text: "", link_url: "", link_label: "" });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    adminApi
+      .about()
+      .then((value) => {
+        setAbout(value);
+        setForm(value);
+      })
+      .catch(toastError);
+  }, [toastError]);
+
+  async function save(): Promise<void> {
+    setSaving(true);
+    try {
+      const saved = await adminApi.updateAbout(form);
+      setAbout(saved);
+      setForm(saved);
+      toast(t("common.saved"), "success");
+    } catch (error) {
+      toastError(error);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!about) return <Skeletons count={1} />;
+
+  return (
+    <>
+      <Notice>{t("admin.about.hint")}</Notice>
+
+      <Field label={t("admin.about.name")}>
+        <Input value={form.title} onChange={(value) => setForm((f) => ({ ...f, title: value }))} />
+      </Field>
+
+      <Field label={t("admin.about.text")}>
+        <Textarea value={form.text} onChange={(value) => setForm((f) => ({ ...f, text: value }))} />
+      </Field>
+
+      <Field label={t("admin.about.linkUrl")} hint={t("admin.about.linkHint")}>
+        <Input
+          value={form.link_url}
+          onChange={(value) => setForm((f) => ({ ...f, link_url: value }))}
+          placeholder="https://t.me/username"
+          inputMode="url"
+        />
+      </Field>
+
+      <Field label={t("admin.about.linkLabel")}>
+        <Input
+          value={form.link_label}
+          onChange={(value) => setForm((f) => ({ ...f, link_label: value }))}
+        />
+      </Field>
+
+      <Button variant="primary" block loading={saving} onClick={() => void save()}>
+        {t("common.save")}
+      </Button>
     </>
   );
 }

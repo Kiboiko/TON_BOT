@@ -18,6 +18,8 @@ export function isTelegram(): boolean {
 }
 
 export function initTelegram(): void {
+  applyViewportHeight();
+  window.addEventListener("resize", applyViewportHeight);
   if (!available) return;
   WebApp.ready();
   WebApp.expand();
@@ -27,6 +29,35 @@ export function initTelegram(): void {
   } catch {
     /* старые клиенты не поддерживают — не критично */
   }
+  // Свайп вниз внутри приложения закрывает Mini App и «дёргает» вёрстку при
+  // скролле длинных списков. Метод появился в Bot API 7.7 — старые клиенты
+  // просто его не знают.
+  try {
+    (WebApp as unknown as { disableVerticalSwipes?: () => void }).disableVerticalSwipes?.();
+  } catch {
+    /* не критично */
+  }
+  WebApp.onEvent("viewportChanged", applyViewportHeight);
+  applyViewportHeight();
+}
+
+/**
+ * Высота приложения в CSS-переменной `--app-height`.
+ *
+ * На Android клавиатура и «схлопывание» шапки меняют видимую высоту, а
+ * position:fixed продолжает считать от старой — из-за этого нижняя навигация
+ * уезжала за экран и её приходилось искать скроллом. Держим точную высоту
+ * сами и делаем каркас flex-колонкой без fixed-элементов.
+ */
+function applyViewportHeight(): void {
+  const reported = available
+    ? WebApp.viewportStableHeight || WebApp.viewportHeight || 0
+    : 0;
+  // берём меньшее: Telegram на Android отдаёт высоту видимой части, а окно
+  // webview выше неё; при открытой клавиатуре наоборот меньше окажется окно
+  const height = reported ? Math.min(reported, window.innerHeight) : window.innerHeight;
+  if (!height) return;
+  document.documentElement.style.setProperty("--app-height", `${Math.round(height)}px`);
 }
 
 export function getInitData(): string {

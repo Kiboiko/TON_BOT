@@ -519,3 +519,118 @@ async def test_ton_site_serves_by_host(client):
     # чужой домен не должен отдавать чужой сайт
     missing = await client.get("/ton-site/", headers={"Host": "other.ton"})
     assert missing.status_code == 404
+
+
+async def test_custom_code_project_publishes(client, queue):
+    """Проект «Свой код» должен доходить до публикации, а не только сохраняться.
+
+    В интерфейсе экран своего кода вёл только к «Сохранить», и выложить такой
+    проект на домен было нечем.
+    """
+    from app.services.publishing import run_publish_job
+
+    h = headers_for(4010)
+    await client.post("/api/user/auth", headers=h, json={})
+    await _give_subscription(4010)
+
+    created = await client.post(
+        "/api/sites", headers=h, json={"type": "custom_code", "title": "Своя страница"}
+    )
+    site_id = created.json()["site"]["id"]
+    await client.post(
+        f"/api/sites/{site_id}/custom-code",
+        headers=h,
+        json={"html": "<b>ручная вёрстка</b>", "css": "b{color:red}", "js": ""},
+    )
+
+    started = await client.post(f"/api/sites/{site_id}/publish", headers=h)
+    assert started.status_code == 200
+
+    job = await queue.dequeue(timeout=1)
+    assert job is not None
+    await run_publish_job(job.payload["site_id"])
+
+    status = (await client.get(f"/api/sites/{site_id}/publish-status", headers=h)).json()
+    assert status["status"] == "published"
+    assert status["storage_bag_id"]
+
+
+def test_button_styles_reach_the_page():
+    """Размер, стиль и цвет кнопки из конструктора должны попадать в вёрстку."""
+    html = render_site(
+        {
+            "blocks": [
+                {
+                    "type": "buttons",
+                    "props": {
+                        "items": [
+                            {
+                                "title": "Купить",
+                                "url": "https://ton.org",
+                                "style": "outline",
+                                "size": "lg",
+                                "color": "green",
+                            }
+                        ]
+                    },
+                }
+            ]
+        }
+    )
+    assert "btn btn-outline btn-l" in html
+    assert "--btn-bg:#12b981" in html
+
+
+def test_button_colour_cannot_inject_css():
+    """Цвет берётся только из палитры: иначе в inline-style уехал бы чужой CSS."""
+    html = render_site(
+        {
+            "blocks": [
+                {
+                    "type": "buttons",
+                    "props": {
+                        "items": [
+                            {"title": "x", "url": "https://ton.org", "color": "#fff;} body{"}
+                        ]
+                    },
+                }
+            ]
+        }
+    )
+    assert "#fff;}" not in html
+    assert 'class="btn btn-primary"' in html
+
+
+def test_new_list_block_is_not_invisible():
+    """У блока-списка сразу есть строка: пустой список ничего не рендерит,
+    и добавленный блок выглядел бы потерянным."""
+    content = default_content_for("links", "Ссылки")
+    links = next(b for b in content["blocks"] if b["type"] == "links")
+    assert links["props"]["items"] == [{}]
+
+    buttons = default_content_for("visitka", "Визитка")["blocks"]
+    btn = next(b for b in buttons if b["type"] == "buttons")
+    assert btn["props"]["items"] == [{"style": "primary", "size": "md", "color": "accent"}]
+
+
+async def test_about_page_is_editable_by_admin(client):
+    """Блок «Об авторе» из ТЗ: админ правит текст, пользователь его видит."""
+    admin = headers_for(777000, "root")
+    await client.post("/api/user/auth", headers=admin, json={})
+
+    saved = await client.patch(
+        "/api/admin/about",
+        headers=admin,
+        json={"title": "Автор", "text": "Проект собран на заказ", "link_url": "https://t.me/x"},
+    )
+    assert saved.status_code == 200
+
+    user = headers_for(4011)
+    await client.post("/api/user/auth", headers=user, json={})
+    seen = (await client.get("/api/about", headers=user)).json()
+    assert seen["title"] == "Автор"
+    assert seen["link_url"] == "https://t.me/x"
+
+    bad = await client.patch("/api/admin/about", headers=admin, json={"link_url": "javascript:1"})
+    assert bad.status_code == 400
+    assert bad.json()["error"]["code"] == "INVALID_URL"

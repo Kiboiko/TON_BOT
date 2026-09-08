@@ -203,8 +203,10 @@ class Subscription(Base):
     tariff_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("tariffs.id", ondelete="SET NULL"), index=True
     )
+    # SET NULL, а не CASCADE: удаление сайта не должно стирать оплаченный срок
+    # и отметку «пробный период уже использован»
     site_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("sites.id", ondelete="CASCADE"), index=True
+        Uuid(as_uuid=True), ForeignKey("sites.id", ondelete="SET NULL"), index=True
     )
     starts_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False

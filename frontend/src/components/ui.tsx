@@ -17,6 +17,89 @@ export function Loading({ text }: { text?: string }) {
   );
 }
 
+/**
+ * Шапка экрана со стрелкой «назад».
+ *
+ * Одной кнопки Telegram недостаточно: на Android аппаратная «назад» просто
+ * перезапускает Mini App, поэтому выход с вложенного экрана должен быть виден
+ * прямо на странице.
+ */
+export function PageHead({
+  title,
+  subtitle,
+  onBack,
+  extra,
+}: {
+  title: string;
+  subtitle?: string;
+  onBack?: () => void;
+  extra?: ReactNode;
+}) {
+  return (
+    <div className="page-header">
+      {onBack ? (
+        <button
+          type="button"
+          className="back-btn"
+          aria-label="←"
+          onClick={() => {
+            haptic.light();
+            onBack();
+          }}
+        >
+          ←
+        </button>
+      ) : null}
+      <div className="grow" style={{ minWidth: 0 }}>
+        <h1>{title}</h1>
+        {subtitle ? <div className="page-subtitle ellipsis">{subtitle}</div> : null}
+      </div>
+      {extra}
+    </div>
+  );
+}
+
+/** Экран не смог загрузиться: вместо вечного спиннера — причина и выход. */
+export function LoadFailed({
+  title,
+  hint,
+  onRetry,
+  retryLabel,
+  onBack,
+  backLabel,
+}: {
+  title: string;
+  hint?: string;
+  onRetry?: () => void;
+  retryLabel?: string;
+  onBack?: () => void;
+  backLabel?: string;
+}) {
+  return (
+    <div className="page">
+      <Empty
+        icon="🚧"
+        title={title}
+        hint={hint}
+        action={
+          <div className="row" style={{ marginTop: 4 }}>
+            {onRetry ? (
+              <Button size="sm" onClick={onRetry}>
+                {retryLabel}
+              </Button>
+            ) : null}
+            {onBack ? (
+              <Button size="sm" variant="primary" onClick={onBack}>
+                {backLabel}
+              </Button>
+            ) : null}
+          </div>
+        }
+      />
+    </div>
+  );
+}
+
 export function Skeletons({ count = 3 }: { count?: number }) {
   return (
     <div className="list">

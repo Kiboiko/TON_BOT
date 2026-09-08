@@ -13,8 +13,10 @@ import {
   Empty,
   Field,
   Input,
+  LoadFailed,
   Loading,
   Notice,
+  PageHead,
   Segmented,
   Sheet,
   Textarea,
@@ -44,6 +46,10 @@ export function EditorPage() {
   const [tab, setTab] = useState<Tab>("blocks");
   const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  // предпросмотр по требованию: постоянный iframe перерисовывался на каждый
+  // введённый символ и тормозил ввод на телефоне
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => showBackButton(() => navigate("/sites")), [navigate]);
 
@@ -63,8 +69,10 @@ export function EditorPage() {
         setLoading(false);
       })
       .catch((error) => {
+        if (cancelled) return;
         toastError(error);
-        navigate("/sites");
+        setFailed(true);
+        setLoading(false);
       });
     return () => {
       cancelled = true;
@@ -80,19 +88,32 @@ export function EditorPage() {
     [content, editor.selectedBlockId],
   );
 
-  const previewHtml = useMemo(
+  // содержимое iframe пересобираем не чаще раза в 400 мс и только когда
+  // предпросмотр открыт: иначе каждая буква перезагружала страницу целиком
+  const previewSource = useMemo(
     () =>
-      content
+      content && previewOpen
         ? renderSite(content, {
             title: editor.title,
             domain: editor.site?.domain ?? null,
             customCode: editor.site?.custom_code ?? null,
             emptyHint: t("preview.emptySite"),
+            draftHints: BLOCK_TITLES(lang, t("editor.blockEmpty")),
           })
         : "",
-    [content, editor.title, editor.site, t],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [content, editor.title, editor.site, previewOpen, lang, t],
   );
+  const previewHtml = useDebounced(previewSource, 400);
 
+  if (failed || (!loading && !content))
+    return (
+      <LoadFailed
+        title={t("editor.siteMissing")}
+        onBack={() => navigate("/sites")}
+        backLabel={t("editor.backToSites")}
+      />
+    );
   if (loading || !content) return <Loading text={t("common.loading")} />;
 
   const patchContent = (patch: Partial<SiteContent>) =>
@@ -123,13 +144,12 @@ export function EditorPage() {
         <Notice kind="danger">{t("editor.saveFailed", { reason: editor.saveError ?? "" })}</Notice>
       ) : null}
 
-      <div className="page-header">
-        <div className="grow">
-          <h1>{editor.title || t("editor.title")}</h1>
-          <div className="page-subtitle">{editor.site?.domain ?? t("editor.title")}</div>
-        </div>
-        {saveBadge}
-      </div>
+      <PageHead
+        title={editor.title || t("editor.title")}
+        subtitle={editor.site?.domain ?? t("editor.title")}
+        onBack={() => navigate("/sites")}
+        extra={saveBadge}
+      />
 
       <div className="row">
         <Button size="sm" disabled={!editor.canUndo()} onClick={editor.undo} title={t("editor.undo")}>
@@ -154,18 +174,20 @@ export function EditorPage() {
         </Button>
       </div>
 
-      <div
-        className="preview-frame"
-        style={{ height: 260, overflow: "hidden", borderRadius: 16 }}
-        aria-label={t("preview.title")}
+      <button
+        type="button"
+        className={previewOpen ? "preview-toggle open" : "preview-toggle"}
+        onClick={() => setPreviewOpen((open) => !open)}
       >
-        <iframe
-          title="live-preview"
-          srcDoc={previewHtml}
-          sandbox="allow-scripts"
-          style={{ width: "100%", height: "100%", border: 0, borderRadius: 16 }}
-        />
-      </div>
+        <span>👁 {previewOpen ? t("editor.hidePreview") : t("editor.showPreview")}</span>
+        <span className="chevron">▾</span>
+      </button>
+
+      {previewOpen ? (
+        <div className="live-preview" style={{ height: 260 }} aria-label={t("preview.title")}>
+          <iframe title="live-preview" srcDoc={previewHtml} sandbox="allow-scripts" />
+        </div>
+      ) : null}
 
       <Segmented<Tab>
         value={tab}
@@ -386,5 +408,27 @@ export function EditorPage() {
         </div>
       </Sheet>
     </div>
+  );
+}
+
+/** Значение, обновляемое не чаще, чем раз в `delay` мс. */
+function useDebounced<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
+}
+
+/**
+ * Подписи для блоков, которые пока нечего показать.
+ *
+ * Пустой блок ссылок раньше рендерился в ничто, и пользователь видел на его
+ * месте пустоту — было непонятно, добавился блок или нет.
+ */
+function BLOCK_TITLES(lang: "ru" | "en", hint: string): Record<string, string> {
+  return Object.fromEntries(
+    BLOCK_CATALOG.map((spec) => [spec.type, `${spec.icon} ${spec.title[lang]} — ${hint}`]),
   );
 }

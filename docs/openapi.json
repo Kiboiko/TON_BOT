@@ -291,6 +291,56 @@
         }
       }
     },
+    "/api/about": {
+      "get": {
+        "tags": [
+          "about"
+        ],
+        "summary": "About",
+        "description": "Текст и ссылка автора. Значения задаёт админ, поэтому они не в коде.",
+        "operationId": "about_api_about_get",
+        "parameters": [
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AboutOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/sites": {
       "get": {
         "tags": [
@@ -822,14 +872,14 @@
         }
       }
     },
-    "/api/sites/{site_id}/custom-code/purchase": {
-      "post": {
+    "/api/sites/{site_id}/dns-status": {
+      "get": {
         "tags": [
           "sites"
         ],
-        "summary": "Purchase Custom Code",
-        "description": "Оплата премиум-блока: цена берётся из активного тарифа kind=custom_code (админка).",
-        "operationId": "purchase_custom_code_api_sites__site_id__custom_code_purchase_post",
+        "summary": "Dns Status",
+        "description": "Настроен ли домен на прямую отдачу — чтобы не просить подпись повторно.",
+        "operationId": "dns_status_api_sites__site_id__dns_status_get",
         "parameters": [
           {
             "name": "site_id",
@@ -864,7 +914,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PurchaseResponse"
+                  "$ref": "#/components/schemas/DnsStatusResponse"
                 }
               }
             }
@@ -882,14 +932,14 @@
         }
       }
     },
-    "/api/sites/{site_id}/custom-code/confirm": {
+    "/api/sites/{site_id}/site-bind": {
       "post": {
         "tags": [
           "sites"
         ],
-        "summary": "Confirm Custom Code",
-        "description": "Подтверждение оплаты премиум-блока — только после проверки транзакции on-chain.",
-        "operationId": "confirm_custom_code_api_sites__site_id__custom_code_confirm_post",
+        "summary": "Site Bind",
+        "description": "Транзакция «направить домен на наш TON-сайт» (DNS-запись `site`).\n\nЗапись `storage` отдаёт сайт из TON Storage и зависит от чужих шлюзов;\nзапись `site` ведёт прямо на наш rldp-http-proxy, поэтому домен открывается,\nпока жив наш сервер. Одно другому не мешает — записи разные.",
+        "operationId": "site_bind_api_sites__site_id__site_bind_post",
         "parameters": [
           {
             "name": "site_id",
@@ -918,23 +968,13 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConfirmPaymentRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessResponse"
+                  "$ref": "#/components/schemas/DnsBindResponse"
                 }
               }
             }
@@ -958,7 +998,7 @@
           "sites"
         ],
         "summary": "Set Custom Code",
-        "description": "Загрузка HTML/CSS/JS. Доступна только после подтверждённой оплаты.",
+        "description": "Загрузка HTML/CSS/JS в проект типа «Свой код». Нужна активная подписка.",
         "operationId": "set_custom_code_api_sites__site_id__custom_code_post",
         "parameters": [
           {
@@ -1126,6 +1166,66 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DomainClaimResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/domains/attach": {
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Attach Domain",
+        "description": "Привязывает к сайту домен, которым пользователь уже владеет.\n\nЗона платформы здесь не нужна: домен существует, разворачивать нечего.\nДостаточно убедиться, что кошелёк пользователя действительно им владеет,\nи запомнить адрес DNS-item — по нему потом собирается транзакция\nDNS-записи (/api/sites/{id}/dns-bind), которая направит домен на сайт.",
+        "operationId": "attach_domain_api_domains_attach_post",
+        "parameters": [
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DomainAttachRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainAttachResponse"
                 }
               }
             }
@@ -1999,6 +2099,113 @@
         }
       }
     },
+    "/api/admin/about": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "About Config",
+        "operationId": "about_config_api_admin_about_get",
+        "parameters": [
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AboutOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update About",
+        "description": "Текст блока «Об авторе» и ссылка на страницу автора.",
+        "operationId": "update_about_api_admin_about_patch",
+        "parameters": [
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AboutUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AboutOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/zone": {
       "get": {
         "tags": [
@@ -2293,6 +2500,88 @@
   },
   "components": {
     "schemas": {
+      "AboutOut": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "link_url": {
+            "type": "string",
+            "title": "Link Url"
+          },
+          "link_label": {
+            "type": "string",
+            "title": "Link Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "text",
+          "link_url",
+          "link_label"
+        ],
+        "title": "AboutOut"
+      },
+      "AboutUpdateRequest": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "link_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Url"
+          },
+          "link_label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Label"
+          }
+        },
+        "type": "object",
+        "title": "AboutUpdateRequest"
+      },
       "AdminDomainItem": {
         "properties": {
           "domain": {
@@ -2671,6 +2960,86 @@
         ],
         "title": "DnsBindResponse"
       },
+      "DnsStatusResponse": {
+        "properties": {
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          },
+          "direct": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Direct"
+          }
+        },
+        "type": "object",
+        "title": "DnsStatusResponse",
+        "description": "Указывает ли домен на наш TON-сайт."
+      },
+      "DomainAttachRequest": {
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Site Id"
+          },
+          "domain": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 3,
+            "title": "Domain"
+          }
+        },
+        "type": "object",
+        "required": [
+          "site_id",
+          "domain"
+        ],
+        "title": "DomainAttachRequest",
+        "description": "Привязка домена .ton, которым пользователь уже владеет."
+      },
+      "DomainAttachResponse": {
+        "properties": {
+          "domain": {
+            "type": "string",
+            "title": "Domain"
+          },
+          "item_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Address"
+          },
+          "needs_publish": {
+            "type": "boolean",
+            "title": "Needs Publish",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "domain"
+        ],
+        "title": "DomainAttachResponse"
+      },
       "DomainCheckResponse": {
         "properties": {
           "available": {
@@ -2745,16 +3114,27 @@
       "DomainClaimResponse": {
         "properties": {
           "transaction": {
-            "$ref": "#/components/schemas/TonConnectTransaction"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TonConnectTransaction"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "domain": {
             "type": "string",
             "title": "Domain"
+          },
+          "already_owned": {
+            "type": "boolean",
+            "title": "Already Owned",
+            "default": false
           }
         },
         "type": "object",
         "required": [
-          "transaction",
           "domain"
         ],
         "title": "DomainClaimResponse"
@@ -2771,6 +3151,17 @@
             "maxLength": 8192,
             "minLength": 8,
             "title": "Tx Hash"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
           }
         },
         "type": "object",
@@ -3244,11 +3635,6 @@
             ],
             "title": "Custom Code"
           },
-          "custom_code_paid": {
-            "type": "boolean",
-            "title": "Custom Code Paid",
-            "default": false
-          },
           "domain": {
             "anyOf": [
               {
@@ -3362,7 +3748,8 @@
           "landing",
           "portfolio",
           "events",
-          "ton_project"
+          "ton_project",
+          "custom_code"
         ],
         "title": "SiteType"
       },
@@ -4060,6 +4447,17 @@
           "domain": {
             "type": "string",
             "title": "Domain"
+          },
+          "collection_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Address"
           }
         },
         "type": "object",

@@ -10,6 +10,7 @@ import type { Method, RequestOptions } from "./client";
 import { defaultContentFor } from "../templates/catalog";
 import { renderSite } from "../features/preview/render";
 import type {
+  About,
   AdminUserListItem,
   Payment,
   Site,
@@ -33,6 +34,7 @@ interface MockState {
   subscriptions: Subscription[];
   payments: Payment[];
   users: AdminUserListItem[];
+  about?: About;
 }
 
 function uuid(): string {
@@ -171,6 +173,13 @@ function findSite(id: string): Site {
   if (!site) fail(404, "SITE_NOT_FOUND", "Сайт не найден");
   return site;
 }
+
+const DEFAULT_ABOUT = {
+  title: "TON Site Builder",
+  text: "Конструктор мини-сайтов на доменах .ton прямо в Telegram.",
+  link_url: "https://t.me/",
+  link_label: "Написать автору",
+};
 
 async function handler(method: Method, path: string, options: RequestOptions): Promise<unknown> {
   await new Promise((resolve) => setTimeout(resolve, 120)); // имитация сети
@@ -454,6 +463,14 @@ async function handler(method: Method, path: string, options: RequestOptions): P
       revenue_last_30d: String(revenue),
       payments_confirmed: state.payments.filter((p) => p.status === "confirmed").length,
     };
+  }
+
+  // --- об авторе ---
+  if (route === "GET /about" || route === "GET /admin/about") return state.about ?? DEFAULT_ABOUT;
+  if (route === "PATCH /admin/about") {
+    state.about = { ...(state.about ?? DEFAULT_ABOUT), ...(body as Record<string, string>) };
+    save(state);
+    return state.about;
   }
 
   fail(404, "NOT_FOUND", `Мок не знает маршрут ${route}`);

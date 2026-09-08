@@ -133,3 +133,53 @@ describe("renderCustomCode", () => {
     expect(renderCustomCode(null)).toBe("");
   });
 });
+
+describe("незаполненные блоки", () => {
+  const withEmptyLinks: SiteContent = {
+    ...base,
+    blocks: [
+      { id: "1", type: "image", props: { image: "https://ton.org/a.png" } },
+      { id: "2", type: "links", props: { items: [{}] } },
+    ],
+  };
+
+  it("в конструкторе показывает заглушку вместо пустоты", () => {
+    // без заглушки блок ссылок сразу после фото исчезал, и пользователю
+    // казалось, что конструктор его потерял
+    const html = renderSite(withEmptyLinks, {
+      draftHints: { links: "🔗 Ссылки — блок пока пустой" },
+    });
+    expect(html).toContain("block draft");
+    expect(html).toContain("Ссылки — блок пока пустой");
+  });
+
+  it("в опубликованном сайте не оставляет следов", () => {
+    const html = renderSite(withEmptyLinks);
+    expect(html).not.toContain("block draft");
+    expect(html).toContain("a.png");
+  });
+});
+
+describe("стили кнопок", () => {
+  const buttons = (items: Record<string, unknown>[]): string =>
+    renderSite({ ...base, blocks: [{ id: "1", type: "buttons", props: { items } }] });
+
+  it("применяет размер и цвет из палитры", () => {
+    const html = buttons([{ title: "Купить", url: "https://ton.org", size: "lg", color: "green" }]);
+    expect(html).toContain("btn-primary btn-l");
+    expect(html).toContain("--btn-bg:#12b981");
+  });
+
+  it("поддерживает контурный стиль", () => {
+    const html = buttons([{ title: "Связаться", url: "https://ton.org", style: "outline" }]);
+    expect(html).toContain("btn-outline");
+  });
+
+  it("не пускает в inline-style произвольный цвет", () => {
+    const html = buttons([
+      { title: "Взлом", url: "https://ton.org", color: "red;} body{display:none" },
+    ]);
+    expect(html).not.toContain("display:none");
+    expect(html).toContain('class="btn btn-primary"');
+  });
+});

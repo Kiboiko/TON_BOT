@@ -223,6 +223,21 @@ class DomainAttachResponse(BaseModel):
     needs_publish: bool = True
 
 
+# --- блок «Об авторе проекта» ---
+class AboutOut(BaseModel):
+    title: str
+    text: str
+    link_url: str
+    link_label: str
+
+
+class AboutUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=120)
+    text: str | None = Field(default=None, max_length=4000)
+    link_url: str | None = Field(default=None, max_length=500)
+    link_label: str | None = Field(default=None, max_length=80)
+
+
 # --- зона субдоменов (админ) ---
 class ZoneOut(BaseModel):
     domain: str

@@ -8,7 +8,17 @@ import { useTranslation } from "react-i18next";
 import { ApiError } from "../../api/client";
 import { domainsApi, sitesApi } from "../../api/endpoints";
 import type { DomainCheck, Site, SiteStatus } from "../../api/types";
-import { Badge, Button, Field, Input, Loading, Notice, Segmented } from "../../components/ui";
+import {
+  Badge,
+  Button,
+  Field,
+  Input,
+  LoadFailed,
+  Loading,
+  Notice,
+  PageHead,
+  Segmented,
+} from "../../components/ui";
 import { useAppStore } from "../../store/app";
 import { haptic, openLink, showBackButton } from "../../telegram/webapp";
 import { useTonPayment } from "../payments/useTonPayment";
@@ -28,6 +38,7 @@ export function PublishPage() {
   const payment = useTonPayment();
 
   const [site, setSite] = useState<Site | null>(null);
+  const [failed, setFailed] = useState(false);
   const [status, setStatus] = useState<SiteStatus | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [bagId, setBagId] = useState<string | null>(null);
@@ -70,7 +81,11 @@ export function PublishPage() {
         }
         if (loaded.status === "publishing") startPolling();
       })
-      .catch(toastError);
+      .catch((error) => {
+        // сайта нет (удалили в другом окне) — показываем выход, а не спиннер
+        toastError(error);
+        setFailed(true);
+      });
     return () => {
       if (pollTimer.current) clearTimeout(pollTimer.current);
     };
@@ -227,31 +242,40 @@ export function PublishPage() {
     }
   }
 
+  if (failed)
+    return (
+      <LoadFailed
+        title={t("editor.siteMissing")}
+        onBack={() => navigate("/sites")}
+        backLabel={t("editor.backToSites")}
+      />
+    );
   if (!site) return <Loading text={t("common.loading")} />;
 
   return (
     <div className="page">
-      <div className="page-header">
-        <div className="grow">
-          <h1>{t("publish.title")}</h1>
-          <div className="page-subtitle">{site.title}</div>
-        </div>
-        {status ? (
-          <Badge
-            kind={
-              status === "published"
-                ? "success"
-                : status === "publish_error"
-                  ? "danger"
-                  : status === "publishing"
-                    ? "accent"
-                    : "default"
-            }
-          >
-            {t(`sites.status.${status}`)}
-          </Badge>
-        ) : null}
-      </div>
+      <PageHead
+        title={t("publish.title")}
+        subtitle={site.title}
+        onBack={() => navigate(`/sites/${siteId}`)}
+        extra={
+          status ? (
+            <Badge
+              kind={
+                status === "published"
+                  ? "success"
+                  : status === "publish_error"
+                    ? "danger"
+                    : status === "publishing"
+                      ? "accent"
+                      : "default"
+              }
+            >
+              {t(`sites.status.${status}`)}
+            </Badge>
+          ) : null
+        }
+      />
 
       {/* --- домен --- */}
       <div className="card">

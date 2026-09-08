@@ -80,6 +80,42 @@ function list(props: Record<string, unknown>, ...keys: string[]): Record<string,
   return [];
 }
 
+/**
+ * Палитра кнопок конструктора.
+ *
+ * Значения фиксированы списком, а не свободным вводом цвета: они попадают в
+ * inline-style готовой страницы, и произвольная строка оттуда открыла бы
+ * инъекцию CSS.
+ */
+export const BUTTON_COLORS: Record<string, { bg: string; fg: string }> = {
+  accent: { bg: "var(--accent)", fg: "#ffffff" },
+  dark: { bg: "#111827", fg: "#ffffff" },
+  light: { bg: "#ffffff", fg: "#111827" },
+  green: { bg: "#12b981", fg: "#ffffff" },
+  red: { bg: "#e5484d", fg: "#ffffff" },
+  orange: { bg: "#f59e0b", fg: "#231a05" },
+  purple: { bg: "#7c5cff", fg: "#ffffff" },
+  pink: { bg: "#ff5c8a", fg: "#ffffff" },
+};
+
+export const BUTTON_STYLES = ["primary", "secondary", "outline"] as const;
+export const BUTTON_SIZES: Record<string, string> = { sm: "btn-s", md: "", lg: "btn-l" };
+
+function buttonClasses(item: Record<string, unknown>): string {
+  const style = (BUTTON_STYLES as readonly string[]).includes(String(item.style))
+    ? String(item.style)
+    : "primary";
+  const size = BUTTON_SIZES[String(item.size ?? "md")] ?? "";
+  return `btn-${style}${size ? ` ${size}` : ""}`;
+}
+
+function buttonStyle(item: Record<string, unknown>): string {
+  const name = String(item.color ?? "accent");
+  const color = BUTTON_COLORS[name];
+  if (!color || name === "accent") return "";
+  return ` style="--btn-bg:${color.bg};--btn-fg:${color.fg}"`;
+}
+
 const renderers: Record<string, (p: Record<string, unknown>) => string> = {
   hero: (p) => {
     const avatar = img(p.image ?? p.avatar, p.title, "hero-img");
@@ -111,10 +147,9 @@ const renderers: Record<string, (p: Record<string, unknown>) => string> = {
       .map((item) => {
         const url = safeUrl(item.url);
         if (!url) return "";
-        const style = item.style === "secondary" ? "btn-secondary" : "btn-primary";
-        return `<a class="btn ${style}" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(
-          item.title ?? "Открыть",
-        )}</a>`;
+        return `<a class="btn ${buttonClasses(item)}"${buttonStyle(item)} href="${escapeHtml(
+          url,
+        )}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title ?? "Открыть")}</a>`;
       })
       .join("");
     return btns ? `<section class="block buttons">${btns}</section>` : "";
@@ -294,9 +329,13 @@ a{color:var(--accent)}
 .link-title{display:block;font-weight:600}
 .link-sub{display:block;font-size:13px;color:var(--muted)}
 .buttons{display:flex;flex-direction:column;gap:10px}
-.btn{display:block;text-align:center;padding:14px 18px;border-radius:14px;font-weight:600;text-decoration:none}
-.btn-primary{background:var(--accent);color:#fff}
-.btn-secondary{background:var(--surface);color:var(--text);border:1px solid rgba(127,127,127,.25)}
+.btn{display:block;text-align:center;padding:14px 18px;border-radius:14px;font-weight:600;
+  text-decoration:none;font-size:16px;border:2px solid transparent;transition:opacity .15s ease}
+.btn-s{padding:10px 14px;font-size:14px;border-radius:11px}
+.btn-l{padding:19px 22px;font-size:19px;border-radius:17px}
+.btn-primary{background:var(--btn-bg,var(--accent));color:var(--btn-fg,#fff)}
+.btn-secondary{background:var(--surface);color:var(--text);border-color:rgba(127,127,127,.25)}
+.btn-outline{background:transparent;color:var(--btn-bg,var(--accent));border-color:var(--btn-bg,var(--accent))}
 .socials{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
 .social{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;
   background:var(--surface);text-decoration:none;font-size:18px}
@@ -318,6 +357,8 @@ figcaption{font-size:13px;color:var(--muted);padding:6px 2px}
 .custom-frame{width:100%;border:0;border-radius:16px;background:var(--surface);min-height:120px}
 .footer{text-align:center;color:var(--muted);font-size:12px;padding-top:12px}
 .empty-hint{text-align:center;color:var(--muted);padding:40px 12px;font-size:14px}
+.draft{border:1px dashed rgba(127,127,127,.45);border-radius:14px;padding:18px;text-align:center;
+  color:var(--muted);font-size:13px}
 `;
 
 const FONT =
@@ -372,19 +413,33 @@ function safeColor(value: unknown, fallback: string): string {
   return fallback;
 }
 
-export function renderBlocks(blocks: Block[] | undefined): string {
+/**
+ * @param draftHints подписи «блок пока пустой» по типу блока. Передаются только
+ * из конструктора: в опубликованном сайте незаполненный блок должен исчезать,
+ * а в редакторе — оставаться видимым, иначе добавленный блок выглядит как
+ * пропавший.
+ */
+export function renderBlocks(
+  blocks: Block[] | undefined,
+  draftHints?: Record<string, string>,
+): string {
   if (!Array.isArray(blocks)) return "";
   return blocks
     .filter((block) => block && !block.hidden)
     .map((block) => {
       const type = ALIASES[block.type] ?? block.type;
       const renderer = renderers[type];
-      if (!renderer) return "";
-      try {
-        return renderer((block.props ?? {}) as Record<string, unknown>);
-      } catch {
-        return "";
+      let html = "";
+      if (renderer) {
+        try {
+          html = renderer((block.props ?? {}) as Record<string, unknown>);
+        } catch {
+          html = "";
+        }
       }
+      if (html.trim()) return html;
+      const hint = draftHints?.[block.type];
+      return hint ? `<section class="block draft">${escapeHtml(hint)}</section>` : "";
     })
     .join("\n");
 }
@@ -407,6 +462,8 @@ export interface RenderOptions {
   domain?: string | null;
   customCode?: CustomCode | null;
   emptyHint?: string;
+  /** Подписи пустых блоков — только для предпросмотра в конструкторе. */
+  draftHints?: Record<string, string>;
 }
 
 /** Собирает полную HTML-страницу сайта — то же, что отдаст backend при публикации. */
@@ -416,7 +473,8 @@ export function renderSite(content: SiteContent | undefined, options: RenderOpti
   const preset = THEME_PRESETS[theme.preset] ?? THEME_PRESETS.light;
   const background = pageBackground(theme, preset.bg);
 
-  let body = renderBlocks(content?.blocks) + renderCustomCode(options.customCode);
+  let body =
+    renderBlocks(content?.blocks, options.draftHints) + renderCustomCode(options.customCode);
   if (!body.trim() && options.emptyHint) {
     body = `<div class="empty-hint">${escapeHtml(options.emptyHint)}</div>`;
   }

@@ -6,17 +6,20 @@
  * все варианты, а на экране остаётся 4 компактные карточки вместо двух десятков.
  */
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { billingApi } from "../../api/endpoints";
 import type { Tariff, TariffDuration } from "../../api/types";
 import { GramAmount } from "../../components/GramIcon";
-import { Badge, Button, Empty, Loading, Notice } from "../../components/ui";
+import { Badge, Button, Empty, Loading, Notice, PageHead } from "../../components/ui";
 import { useAppStore } from "../../store/app";
+import { showBackButton } from "../../telegram/webapp";
 import { useTonPayment } from "../payments/useTonPayment";
 import { availableDurations, discountPercent, groupPlans } from "./plans";
 
 export function TariffsPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const toast = useAppStore((s) => s.toast);
   const toastError = useAppStore((s) => s.toastError);
   const payment = useTonPayment();
@@ -24,6 +27,8 @@ export function TariffsPage() {
   const [tariffs, setTariffs] = useState<Tariff[] | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [duration, setDuration] = useState<TariffDuration>("month");
+
+  useEffect(() => showBackButton(() => navigate("/subscriptions")), [navigate]);
 
   useEffect(() => {
     billingApi
@@ -62,12 +67,11 @@ export function TariffsPage() {
 
   return (
     <div className="page">
-      <div className="page-header">
-        <div>
-          <h1>{t("tariffs.title")}</h1>
-          <div className="page-subtitle">{t("tariffs.subtitle")}</div>
-        </div>
-      </div>
+      <PageHead
+        title={t("tariffs.title")}
+        subtitle={t("tariffs.subtitle")}
+        onBack={() => navigate("/subscriptions")}
+      />
 
       {!payment.isConnected ? (
         <div className="card">

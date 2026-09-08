@@ -9,7 +9,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { sitesApi } from "../../api/endpoints";
 import type { Site } from "../../api/types";
-import { Button, Loading, Segmented } from "../../components/ui";
+import { Button, LoadFailed, Loading, PageHead, Segmented } from "../../components/ui";
 import { useAppStore } from "../../store/app";
 import { showBackButton } from "../../telegram/webapp";
 import { renderSite } from "./render";
@@ -24,6 +24,7 @@ export function PreviewPage() {
   const toastError = useAppStore((s) => s.toastError);
 
   const [site, setSite] = useState<Site | null>(null);
+  const [failed, setFailed] = useState(false);
   const [html, setHtml] = useState("");
   const [device, setDevice] = useState<Device>("mobile");
   const [source, setSource] = useState<Source>("local");
@@ -60,7 +61,12 @@ export function PreviewPage() {
         setSite(loaded);
         loadLocal(loaded);
       })
-      .catch(toastError);
+      .catch((error) => {
+        // сайт мог быть удалён в другом окне: без явного состояния экран
+        // навсегда оставался бы на спиннере
+        toastError(error);
+        setFailed(true);
+      });
   }, [siteId, loadLocal, toastError]);
 
   useEffect(() => {
@@ -69,16 +75,23 @@ export function PreviewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source]);
 
+  if (failed)
+    return (
+      <LoadFailed
+        title={t("editor.siteMissing")}
+        onBack={() => navigate("/sites")}
+        backLabel={t("editor.backToSites")}
+      />
+    );
   if (!site) return <Loading text={t("common.loading")} />;
 
   return (
     <div className="page">
-      <div className="page-header">
-        <div>
-          <h1>{t("preview.title")}</h1>
-          <div className="page-subtitle">{t("preview.hint")}</div>
-        </div>
-      </div>
+      <PageHead
+        title={t("preview.title")}
+        subtitle={t("preview.hint")}
+        onBack={() => navigate(`/sites/${siteId}`)}
+      />
 
       <Segmented<Device>
         value={device}
