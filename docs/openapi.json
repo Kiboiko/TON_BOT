@@ -992,13 +992,203 @@
         }
       }
     },
+    "/api/sites/{site_id}/custom-code/price": {
+      "get": {
+        "tags": [
+          "sites"
+        ],
+        "summary": "Custom Code Price",
+        "description": "Сколько стоит свой код для этого сайта и оплачен ли он уже.",
+        "operationId": "custom_code_price_api_sites__site_id__custom_code_price_get",
+        "parameters": [
+          {
+            "name": "site_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Site Id"
+            }
+          },
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomCodePriceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sites/{site_id}/custom-code/purchase": {
+      "post": {
+        "tags": [
+          "sites"
+        ],
+        "summary": "Purchase Custom Code",
+        "description": "Разовая оплата своего кода: цена берётся из тарифа kind=custom_code.",
+        "operationId": "purchase_custom_code_api_sites__site_id__custom_code_purchase_post",
+        "parameters": [
+          {
+            "name": "site_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Site Id"
+            }
+          },
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sites/{site_id}/custom-code/confirm": {
+      "post": {
+        "tags": [
+          "sites"
+        ],
+        "summary": "Confirm Custom Code",
+        "description": "Подтверждение оплаты — только после проверки транзакции в блокчейне.",
+        "operationId": "confirm_custom_code_api_sites__site_id__custom_code_confirm_post",
+        "parameters": [
+          {
+            "name": "site_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Site Id"
+            }
+          },
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmPaymentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/sites/{site_id}/custom-code": {
       "post": {
         "tags": [
           "sites"
         ],
         "summary": "Set Custom Code",
-        "description": "Загрузка HTML/CSS/JS в проект типа «Свой код». Нужна активная подписка.",
+        "description": "Загрузка HTML/CSS/JS в проект «Свой код». Нужна разовая оплата этого сайта.",
         "operationId": "set_custom_code_api_sites__site_id__custom_code_post",
         "parameters": [
           {
@@ -2927,6 +3117,25 @@
         ],
         "title": "ConnectWalletResponse"
       },
+      "CustomCodePriceResponse": {
+        "properties": {
+          "price_ton": {
+            "type": "string",
+            "title": "Price Ton"
+          },
+          "paid": {
+            "type": "boolean",
+            "title": "Paid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "price_ton",
+          "paid"
+        ],
+        "title": "CustomCodePriceResponse",
+        "description": "Цена разовой покупки своего кода и признак «уже оплачено»."
+      },
       "CustomCodeRequest": {
         "properties": {
           "html": {
@@ -3634,6 +3843,11 @@
               }
             ],
             "title": "Custom Code"
+          },
+          "custom_code_paid": {
+            "type": "boolean",
+            "title": "Custom Code Paid",
+            "default": false
           },
           "domain": {
             "anyOf": [

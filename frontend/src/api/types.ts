@@ -95,6 +95,8 @@ export interface Site {
   title: string;
   content_json: SiteContent;
   custom_code: CustomCode | null;
+  /** возможность своего кода оплачена для этого сайта (разовый платёж) */
+  custom_code_paid: boolean;
   domain: string | null;
   dns_item_address: string | null;
   collection_address: string | null;

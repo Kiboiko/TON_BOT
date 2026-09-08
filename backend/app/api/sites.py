@@ -6,23 +6,30 @@ import uuid
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, SessionDep
 from app.core.config import settings
-from app.core.errors import BadRequest, Conflict, NotFound
+from app.core.errors import BadRequest, Conflict, NotFound, PaymentRequired
 from app.models import (
+    PaymentPurpose,
     Site,
     SiteStatus,
     SiteType,
+    Tariff,
+    TariffKind,
     utcnow,
 )
 from app.schemas import (
+    ConfirmPaymentRequest,
+    CustomCodePriceResponse,
     CustomCodeRequest,
     DnsBindResponse,
     DnsStatusResponse,
     PreviewResponse,
     PublishResponse,
     PublishStatusResponse,
+    PurchaseResponse,
     SiteCreateRequest,
     SiteListItem,
     SiteResponse,
@@ -30,6 +37,7 @@ from app.schemas import (
     SuccessResponse,
     TonConnectTransaction,
 )
+from app.services import payments as payments_service
 from app.services import subscriptions as subs_service
 from app.api.public import public_site_url
 from app.services.dns import (
@@ -59,6 +67,26 @@ def _ensure_custom_code_site(site: Site) -> None:
         )
 
 
+def _ensure_custom_code_paid(site: Site) -> None:
+    """Возможность своего кода оплачивается разово и отдельно на каждый сайт."""
+    if not site.custom_code_paid:
+        raise PaymentRequired(
+            "Custom code is not paid for this site", code="CUSTOM_CODE_NOT_PAID"
+        )
+
+
+async def _custom_code_tariff(session: AsyncSession) -> Tariff:
+    """Строка тарифа с ценой своего кода. Цену меняет админ в разделе тарифов."""
+    tariff = await session.scalar(
+        select(Tariff)
+        .where(Tariff.kind == TariffKind.custom_code, Tariff.is_active.is_(True))
+        .order_by(Tariff.price_ton.asc())
+    )
+    if tariff is None:
+        raise NotFound("Custom code price is not configured", code="TARIFF_NOT_FOUND")
+    return tariff
+
+
 def _check_content_size(content: dict | None) -> None:
     if content and content_size(content) > settings.MAX_CONTENT_JSON_BYTES:
         raise BadRequest(
@@ -79,8 +107,6 @@ async def list_sites(session: SessionDep, user: CurrentUser) -> list[SiteListIte
 async def create_site(
     session: SessionDep, user: CurrentUser, body: SiteCreateRequest
 ) -> SiteResponse:
-    if body.type is SiteType.custom_code:
-        await subs_service.ensure_custom_code_right(session, user)
     await subs_service.ensure_can_create_site(session, user)
     _check_content_size(body.content_json)
 
@@ -108,7 +134,7 @@ async def update_site(
         site.content_json = body.content_json
     if body.custom_code is not None:
         _ensure_custom_code_site(site)
-        await subs_service.ensure_custom_code_right(session, user)
+        _ensure_custom_code_paid(site)
         site.custom_code = body.custom_code.model_dump()
     site.updated_at = utcnow()
     await session.flush()
@@ -134,7 +160,8 @@ async def preview_site(
     html = render_site(
         site.content_json,
         title=site.title,
-        custom_code=site.custom_code,
+        # неоплаченный код на страницу не попадает — ни в превью, ни в публикации
+        custom_code=site.custom_code if site.custom_code_paid else None,
         domain=site.domain,
         site_type=site.type.value,
     )
@@ -220,14 +247,64 @@ async def render_published(
 
 
 # ------------------------------------------------- проект «Свой код»
+@router.get("/{site_id}/custom-code/price", response_model=CustomCodePriceResponse)
+async def custom_code_price(
+    session: SessionDep, user: CurrentUser, site_id: uuid.UUID
+) -> CustomCodePriceResponse:
+    """Сколько стоит свой код для этого сайта и оплачен ли он уже."""
+    site = await _get_site(session, site_id, user)
+    tariff = await _custom_code_tariff(session)
+    return CustomCodePriceResponse(price_ton=tariff.price_ton, paid=site.custom_code_paid)
+
+
+@router.post("/{site_id}/custom-code/purchase", response_model=PurchaseResponse)
+async def purchase_custom_code(
+    session: SessionDep, user: CurrentUser, site_id: uuid.UUID
+) -> PurchaseResponse:
+    """Разовая оплата своего кода: цена берётся из тарифа kind=custom_code."""
+    site = await _get_site(session, site_id, user)
+    _ensure_custom_code_site(site)
+    if site.custom_code_paid:
+        raise Conflict("Custom code is already paid for this site", code="CUSTOM_CODE_PAID")
+
+    tariff = await _custom_code_tariff(session)
+    payment = await payments_service.create_payment(
+        session,
+        user=user,
+        amount=tariff.price_ton,
+        purpose=PaymentPurpose.custom_code,
+        related_id=site.id,
+    )
+    tx = payments_service.build_payment_transaction(payment)
+    return PurchaseResponse(
+        transaction=TonConnectTransaction(**tx.to_tonconnect()), payment_id=payment.id
+    )
+
+
+@router.post("/{site_id}/custom-code/confirm", response_model=SuccessResponse)
+async def confirm_custom_code(
+    session: SessionDep, user: CurrentUser, site_id: uuid.UUID, body: ConfirmPaymentRequest
+) -> SuccessResponse:
+    """Подтверждение оплаты — только после проверки транзакции в блокчейне."""
+    site = await _get_site(session, site_id, user)
+    payment = await payments_service.get_payment_for_user(session, body.payment_id, user)
+    if payment.purpose != PaymentPurpose.custom_code or payment.related_id != site.id:
+        raise BadRequest("Payment does not belong to this site", code="PAYMENT_MISMATCH")
+
+    await payments_service.confirm_payment(session, payment, body.tx_hash)
+    site.custom_code_paid = True
+    await session.flush()
+    return SuccessResponse()
+
+
 @router.post("/{site_id}/custom-code", response_model=SuccessResponse)
 async def set_custom_code(
     session: SessionDep, user: CurrentUser, site_id: uuid.UUID, body: CustomCodeRequest
 ) -> SuccessResponse:
-    """Загрузка HTML/CSS/JS в проект типа «Свой код». Нужна активная подписка."""
+    """Загрузка HTML/CSS/JS в проект «Свой код». Нужна разовая оплата этого сайта."""
     site = await _get_site(session, site_id, user)
     _ensure_custom_code_site(site)
-    await subs_service.ensure_custom_code_right(session, user)
+    _ensure_custom_code_paid(site)
 
     total = len(body.html.encode()) + len(body.css.encode()) + len(body.js.encode())
     if total > settings.MAX_CUSTOM_CODE_BYTES:

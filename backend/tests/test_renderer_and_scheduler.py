@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from datetime import timedelta
 from decimal import Decimal
 
@@ -169,19 +170,38 @@ async def _give_subscription(telegram_id: int, *, trial: bool = False) -> None:
         await session.commit()
 
 
-async def test_custom_code_project_requires_subscription(client):
-    """«Свой код» — отдельный тип проекта, и открывает его только подписка."""
+async def _set_custom_code_price(price: str) -> None:
+    """Цену разовой покупки задаёт админ строкой тарифа kind=custom_code."""
+    async with SessionLocal() as session:
+        tariff = await session.scalar(
+            select(Tariff).where(Tariff.kind == TariffKind.custom_code)
+        )
+        if tariff is None:
+            session.add(
+                Tariff(
+                    name="Свой код",
+                    sites_limit=1,
+                    duration=TariffDuration.forever,
+                    price_ton=Decimal(price),
+                    kind=TariffKind.custom_code,
+                    is_active=True,
+                )
+            )
+        else:
+            tariff.price_ton = Decimal(price)
+            tariff.is_active = True
+        await session.commit()
+
+
+async def test_custom_code_is_a_one_time_purchase(client, ton):
+    """«Свой код» открывает разовый платёж за сайт, а не подписка."""
+    from tests.test_full_cycle import paid_tx, payment_comment
+
+    await _set_custom_code_price("5")
     h = headers_for(4001)
     await client.post("/api/user/auth", headers=h, json={})
 
-    denied = await client.post(
-        "/api/sites", headers=h, json={"type": "custom_code", "title": "CC"}
-    )
-    assert denied.status_code == 402
-    assert denied.json()["error"]["code"] == "SUBSCRIPTION_REQUIRED"
-
-    await _give_subscription(4001)
-
+    # сам проект создаётся свободно: платят за возможность, а не за создание
     created = await client.post(
         "/api/sites", headers=h, json={"type": "custom_code", "title": "CC"}
     )
@@ -190,6 +210,30 @@ async def test_custom_code_project_requires_subscription(client):
     site_id = site["id"]
     # у такого проекта нет блоков: страница — это код пользователя
     assert site["content_json"]["blocks"] == []
+    assert site["custom_code_paid"] is False
+
+    price = await client.get(f"/api/sites/{site_id}/custom-code/price", headers=h)
+    assert price.json() == {"price_ton": "5", "paid": False}
+
+    denied = await client.post(
+        f"/api/sites/{site_id}/custom-code",
+        headers=h,
+        json={"html": "<b>x</b>", "css": "", "js": ""},
+    )
+    assert denied.status_code == 402
+    assert denied.json()["error"]["code"] == "CUSTOM_CODE_NOT_PAID"
+
+    purchase = await client.post(f"/api/sites/{site_id}/custom-code/purchase", headers=h)
+    assert purchase.status_code == 200
+    payment_id = purchase.json()["payment_id"]
+    ton.add(paid_tx(await payment_comment(payment_id), "5", tx_hash="cc-hash-0001"))
+
+    confirmed = await client.post(
+        f"/api/sites/{site_id}/custom-code/confirm",
+        headers=h,
+        json={"payment_id": payment_id, "tx_hash": "cc-hash-0001"},
+    )
+    assert confirmed.status_code == 200
 
     allowed = await client.post(
         f"/api/sites/{site_id}/custom-code",
@@ -201,17 +245,63 @@ async def test_custom_code_project_requires_subscription(client):
     preview = await client.post(f"/api/sites/{site_id}/preview", headers=h)
     assert "<iframe" in preview.json()["preview_html"]
 
+    # второй раз денег не берём
+    again = await client.post(f"/api/sites/{site_id}/custom-code/purchase", headers=h)
+    assert again.status_code == 409
+    assert again.json()["error"]["code"] == "CUSTOM_CODE_PAID"
 
-async def test_trial_does_not_open_custom_code(client):
-    """Пробный период — это бесплатная публикация, а не доступ к платному типу."""
+
+async def test_custom_code_price_comes_from_admin(client):
+    """Цену меняет админ в тарифах — покупка идёт по новой сумме."""
+    await _set_custom_code_price("12.5")
     h = headers_for(4005)
     await client.post("/api/user/auth", headers=h, json={})
-    await _give_subscription(4005, trial=True)
-
-    denied = await client.post(
+    created = await client.post(
         "/api/sites", headers=h, json={"type": "custom_code", "title": "CC"}
     )
-    assert denied.status_code == 402
+    site_id = created.json()["site"]["id"]
+
+    price = await client.get(f"/api/sites/{site_id}/custom-code/price", headers=h)
+    assert price.json()["price_ton"] == "12.5"
+
+    purchase = await client.post(f"/api/sites/{site_id}/custom-code/purchase", headers=h)
+    assert purchase.json()["transaction"]["messages"][0]["amount"] == str(12_500_000_000)
+
+
+async def test_unpaid_custom_code_never_reaches_the_page(client):
+    """Неоплаченный код не должен попадать ни в превью, ни в публикацию."""
+    from app.services.publishing import build_site_html
+
+    h = headers_for(4006)
+    await client.post("/api/user/auth", headers=h, json={})
+    created = await client.post(
+        "/api/sites", headers=h, json={"type": "custom_code", "title": "CC"}
+    )
+    site_id = created.json()["site"]["id"]
+
+    async with SessionLocal() as session:
+        site = await session.get(Site, uuid.UUID(site_id))
+        site.custom_code = {"html": "<b>секрет</b>", "css": "", "js": ""}
+        await session.commit()
+
+    preview = await client.post(f"/api/sites/{site_id}/preview", headers=h)
+    assert "секрет" not in preview.json()["preview_html"]
+
+    async with SessionLocal() as session:
+        site = await session.get(Site, uuid.UUID(site_id))
+        assert "секрет" not in build_site_html(site)
+        site.custom_code_paid = True
+        await session.commit()
+        site = await session.get(Site, uuid.UUID(site_id))
+        assert "секрет" in build_site_html(site)
+
+
+async def _mark_custom_code_paid(site_id: str) -> None:
+    """Разовая покупка уже совершена — оплату проверяет отдельный тест."""
+    async with SessionLocal() as session:
+        site = await session.get(Site, uuid.UUID(site_id))
+        site.custom_code_paid = True
+        await session.commit()
 
 
 async def test_custom_code_is_rejected_inside_regular_project(client):
@@ -242,12 +332,12 @@ async def test_custom_code_is_rejected_inside_regular_project(client):
 async def test_custom_code_size_limit(client):
     h = headers_for(4002)
     await client.post("/api/user/auth", headers=h, json={})
-    await _give_subscription(4002)
 
     created = await client.post(
         "/api/sites", headers=h, json={"type": "custom_code", "title": "big"}
     )
     site_id = created.json()["site"]["id"]
+    await _mark_custom_code_paid(site_id)
 
     resp = await client.post(
         f"/api/sites/{site_id}/custom-code",
@@ -537,6 +627,7 @@ async def test_custom_code_project_publishes(client, queue):
         "/api/sites", headers=h, json={"type": "custom_code", "title": "Своя страница"}
     )
     site_id = created.json()["site"]["id"]
+    await _mark_custom_code_paid(site_id)
     await client.post(
         f"/api/sites/{site_id}/custom-code",
         headers=h,

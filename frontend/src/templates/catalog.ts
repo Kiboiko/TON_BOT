@@ -268,8 +268,8 @@ export interface TemplateSpec {
   title: { ru: string; en: string };
   description: { ru: string; en: string };
   blocks: BlockType[];
-  /** Тип проекта, который открывает только подписка. */
-  subscriptionOnly?: boolean;
+  /** Возможность оплачивается разово на каждый сайт, а не подпиской. */
+  paidOnce?: boolean;
 }
 
 /** Шесть шаблонов из ТЗ плюс «Свой код». Набор блоков совпадает с backend. */
@@ -326,7 +326,7 @@ export const TEMPLATES: TemplateSpec[] = [
       en: "A whole page of your own HTML, CSS and JS",
     },
     blocks: [],
-    subscriptionOnly: true,
+    paidOnce: true,
   },
 ];
 

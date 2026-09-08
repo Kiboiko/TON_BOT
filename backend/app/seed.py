@@ -80,6 +80,17 @@ TIERS: list[dict] = [
     },
 ]
 
+# Разовая покупка возможности «Свой код» — по ТЗ это не подписка, а фиксированная
+# плата за один сайт. Цена по умолчанию; дальше её меняет админ в тарифах.
+CUSTOM_CODE_TARIFF: dict = {
+    "name": "Свой код",
+    "description": "Разовая оплата своего HTML, CSS и JS для одного сайта",
+    "sites_limit": 1,
+    "kind": TariffKind.custom_code,
+    "duration": TariffDuration.forever,
+    "price_ton": Decimal("5"),
+}
+
 # Старые названия тарифов до перехода на сетку Basic/Pro/Business/Max.
 # Переименовываем, а не пересоздаём: на эти строки ссылаются оплаченные подписки.
 LEGACY_RENAMES: dict[str, str] = {
@@ -121,17 +132,19 @@ async def seed() -> None:
                 tariff.description = descriptions.get(new_name, tariff.description)
                 renamed += 1
 
-        # 2. Отключение тарифа на разовую покупку блока «Свой код».
-        #    Удалять нельзя: на строку могут ссылаться старые платежи.
-        disabled = 0
-        legacy = await session.scalars(
-            select(Tariff).where(
-                Tariff.kind == TariffKind.custom_code, Tariff.is_active.is_(True)
-            )
+        # 2. Разовая покупка «Своего кода». Цену задаёт админ, поэтому строку
+        #    только создаём — существующую не трогаем, иначе изменённая цена
+        #    возвращалась бы к дефолтной при каждом запуске.
+        custom = await session.scalar(
+            select(Tariff).where(Tariff.kind == TariffKind.custom_code)
         )
-        for tariff in legacy.all():
-            tariff.is_active = False
-            disabled += 1
+        if custom is None:
+            session.add(Tariff(**CUSTOM_CODE_TARIFF))
+            custom_created = True
+        else:
+            # строка могла быть погашена, пока доступ давала подписка
+            custom_created = False
+            custom.is_active = True
 
         await session.flush()
 
@@ -158,9 +171,9 @@ async def seed() -> None:
 
         await session.commit()
         log.info(
-            "tariffs renamed: %s, disabled: %s, created: %s, admins promoted: %s",
+            "tariffs renamed: %s, custom code created: %s, created: %s, admins promoted: %s",
             renamed,
-            disabled,
+            custom_created,
             created,
             promoted,
         )

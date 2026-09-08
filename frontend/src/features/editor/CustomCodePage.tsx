@@ -1,16 +1,18 @@
 /**
  * B4. Проект «Свой код» — отдельный тип сайта, а не блок внутри другого проекта.
  *
- * Страница целиком собирается из HTML/CSS/JS пользователя. Тип доступен только
- * по активной подписке: без неё backend отвечает 402, и экран показывает, что
- * нужно оформить тариф. Превью рендерится в изолированном iframe.
+ * Страница целиком собирается из HTML/CSS/JS пользователя. Возможность
+ * оплачивается разово и отдельно на каждый сайт (по ТЗ — не подписка): пока
+ * платежа нет, backend отвечает 402, а код не попадает ни в превью, ни в
+ * публикацию. Цену задаёт администратор в тарифах.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ApiError } from "../../api/client";
-import { billingApi, sitesApi, uploadsApi } from "../../api/endpoints";
-import type { CustomCode, Site, Subscription } from "../../api/types";
+import { sitesApi, uploadsApi } from "../../api/endpoints";
+import type { CustomCode, Site } from "../../api/types";
+import { GramAmount } from "../../components/GramIcon";
 import {
   Badge,
   Button,
@@ -22,6 +24,7 @@ import {
 } from "../../components/ui";
 import { useAppStore } from "../../store/app";
 import { showBackButton } from "../../telegram/webapp";
+import { useTonPayment } from "../payments/useTonPayment";
 import { renderCustomCode } from "../preview/render";
 
 type CodeTab = "html" | "css" | "js";
@@ -68,6 +71,7 @@ export function CustomCodePage() {
   const { t } = useTranslation();
   const toast = useAppStore((s) => s.toast);
   const toastError = useAppStore((s) => s.toastError);
+  const payment = useTonPayment();
 
   const [site, setSite] = useState<Site | null>(null);
   const [failed, setFailed] = useState(false);
@@ -76,17 +80,14 @@ export function CustomCodePage() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
-  // подписка кончилась, пока экран был открыт, — backend скажет об этом на сохранении
-  const [locked, setLocked] = useState(false);
-  // подписка, которая и открывает этот тип проекта: без неё непонятно, за что
-  // платил пользователь и до какого числа код доступен
-  const [subscription, setSubscription] = useState<Subscription | null>(null);
-  const [subsLoaded, setSubsLoaded] = useState(false);
+  const [paid, setPaid] = useState(false);
+  const [price, setPrice] = useState<string | null>(null);
+  const [buying, setBuying] = useState(false);
 
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => showBackButton(() => navigate(`/sites/${siteId}`)), [navigate, siteId]);
+  useEffect(() => showBackButton(() => navigate("/sites")), [navigate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,6 +96,7 @@ export function CustomCodePage() {
       .then(({ site: loaded }) => {
         if (cancelled) return;
         setSite(loaded);
+        setPaid(loaded.custom_code_paid);
         if (loaded.custom_code) setCode(loaded.custom_code);
       })
       .catch((error) => {
@@ -108,16 +110,15 @@ export function CustomCodePage() {
   }, [siteId, toastError]);
 
   useEffect(() => {
-    billingApi
-      .subscriptions()
-      .then((subs) => {
-        // «Свой код» открывает любая платная подписка, но не пробный период
-        const paid = subs.filter((s) => !s.is_trial && s.status !== "expired");
-        setSubscription(paid[0] ?? null);
+    sitesApi
+      .customCodePrice(siteId)
+      .then(({ price_ton, paid: alreadyPaid }) => {
+        setPrice(price_ton);
+        setPaid((current) => current || alreadyPaid);
       })
-      .catch(() => setSubscription(null))
-      .finally(() => setSubsLoaded(true));
-  }, []);
+      // цена не настроена админом — покупку не показываем, но код не ломаем
+      .catch(() => setPrice(null));
+  }, [siteId]);
 
   const previewHtml = useMemo(
     () =>
@@ -165,16 +166,42 @@ export function CustomCodePage() {
     }
   }
 
+  /** Разовая покупка: подпись в кошельке, подтверждение — только on-chain. */
+  async function buy(): Promise<void> {
+    setBuying(true);
+    try {
+      const { transaction, payment_id } = await sitesApi.purchaseCustomCode(siteId);
+      const done = await payment.pay(transaction, (txHash) =>
+        sitesApi.confirmCustomCode(siteId, { payment_id, tx_hash: txHash }),
+      );
+      if (!done) return;
+      setPaid(true);
+      toast(t("customCode.purchased"), "success");
+      // код, набранный до оплаты, сохраняем сразу — иначе он потерялся бы
+      if (code.html || code.css || code.js) await save();
+    } catch (error) {
+      // оплату мог перехватить второй экран или повтор — сверяемся с сервером
+      if (error instanceof ApiError && error.code === "CUSTOM_CODE_PAID") {
+        setPaid(true);
+        return;
+      }
+      toastError(error);
+    } finally {
+      setBuying(false);
+    }
+  }
+
   async function save(): Promise<boolean> {
     setSaving(true);
     try {
       await sitesApi.setCustomCode(siteId, code);
-      setLocked(false);
+      setPaid(true);
       toast(t("common.saved"), "success");
       return true;
     } catch (error) {
-      if (error instanceof ApiError && error.code === "SUBSCRIPTION_REQUIRED") {
-        setLocked(true);
+      if (error instanceof ApiError && error.code === "CUSTOM_CODE_NOT_PAID") {
+        setPaid(false);
+        toast(t("customCode.payFirst"), "error");
         return false;
       }
       toastError(error);
@@ -194,19 +221,19 @@ export function CustomCodePage() {
     );
   if (!site) return <Loading text={t("common.loading")} />;
 
-  const expires = subscription?.is_forever
-    ? t("subscriptions.forever")
-    : subscription?.expires_at
-      ? new Date(subscription.expires_at).toLocaleDateString()
-      : "";
-
   return (
     <div className="page">
       <PageHead
         title={t("customCode.title")}
         subtitle={site.title}
         onBack={() => navigate("/sites")}
-        extra={locked ? <Badge kind="danger">🔒</Badge> : null}
+        extra={
+          paid ? (
+            <Badge kind="success">{t("customCode.paid")}</Badge>
+          ) : (
+            <Badge kind="warning">🔒</Badge>
+          )
+        }
       />
 
       {/* публикация и предпросмотр — те же экраны, что у обычных сайтов:
@@ -219,6 +246,7 @@ export function CustomCodePage() {
         <Button
           size="sm"
           variant="primary"
+          disabled={!paid}
           loading={saving}
           onClick={async () => {
             if (await save()) navigate(`/sites/${siteId}/publish`);
@@ -230,48 +258,38 @@ export function CustomCodePage() {
 
       <Notice>{t("customCode.description")}</Notice>
 
-      {/* состояние подписки: этот тип проекта живёт только пока она активна */}
-      {subsLoaded ? (
+      {/* разовая оплата: подписка для этого не нужна */}
+      {!paid ? (
         <div className="card">
           <div className="card-row">
             <div className="grow">
-              <div className="card-title">{t("customCode.subscription")}</div>
-              <div className="card-sub">
-                {subscription
-                  ? `${subscription.tariff?.name ?? t("subscriptions.trial")}${
-                      expires ? ` · ${t("subscriptions.until", { date: expires })}` : ""
-                    }`
-                  : t("customCode.subscriptionHint")}
+              <div className="card-title">{t("customCode.locked")}</div>
+              <div className="card-sub" style={{ marginTop: 4 }}>
+                {t("customCode.priceHint")}
               </div>
             </div>
-            {subscription ? (
-              <Badge kind={subscription.status === "expiring_soon" ? "warning" : "success"}>
-                {t(`subscriptions.status.${subscription.status}`)}
-              </Badge>
-            ) : (
-              <Button size="sm" variant="primary" onClick={() => navigate("/tariffs")}>
-                {t("sites.upgrade")}
-              </Button>
-            )}
-          </div>
-          <div style={{ marginTop: 10 }}>
-            <Button size="sm" onClick={() => navigate("/subscriptions")}>
-              {t("subscriptions.title")} →
-            </Button>
-          </div>
-        </div>
-      ) : null}
-
-      {locked ? (
-        <div className="card">
-          <div className="card-title">{t("customCode.locked")}</div>
-          <div className="card-sub" style={{ marginTop: 4 }}>
-            {t("customCode.subscriptionHint")}
+            {price ? (
+              <div style={{ fontSize: 18, fontWeight: 700 }}>
+                <GramAmount value={price} size={16} />
+              </div>
+            ) : null}
           </div>
           <div style={{ marginTop: 12 }}>
-            <Button variant="primary" block onClick={() => navigate("/tariffs")}>
-              {t("sites.upgrade")}
-            </Button>
+            {!payment.isConnected ? (
+              <Button variant="primary" block onClick={payment.connect}>
+                {t("domain.connectWallet")}
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                block
+                disabled={!price}
+                loading={buying || payment.stage === "signing" || payment.stage === "confirming"}
+                onClick={() => void buy()}
+              >
+                {price ? t("customCode.buy", { price }) : t("customCode.priceMissing")}
+              </Button>
+            )}
           </div>
         </div>
       ) : null}
@@ -330,7 +348,13 @@ export function CustomCodePage() {
         />
       ) : null}
 
-      <Button variant="primary" block loading={saving} onClick={() => void save()}>
+      <Button
+        variant="primary"
+        block
+        disabled={!paid}
+        loading={saving}
+        onClick={() => void save()}
+      >
         {t("customCode.save")}
       </Button>
     </div>

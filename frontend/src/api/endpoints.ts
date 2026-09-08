@@ -67,7 +67,15 @@ export const sitesApi = {
   dnsStatus: (id: string) =>
     api.get<{ domain: string | null; direct: boolean | null }>(`/sites/${id}/dns-status`),
 
-  // проект типа «Свой код»: код доступен по подписке
+  // проект типа «Свой код»: возможность покупается разово на каждый сайт
+  customCodePrice: (id: string) =>
+    api.get<{ price_ton: string; paid: boolean }>(`/sites/${id}/custom-code/price`),
+  purchaseCustomCode: (id: string) =>
+    api.post<{ transaction: TonConnectTransaction; payment_id: string }>(
+      `/sites/${id}/custom-code/purchase`,
+    ),
+  confirmCustomCode: (id: string, body: { payment_id: string; tx_hash: string }) =>
+    api.post<{ success: boolean }>(`/sites/${id}/custom-code/confirm`, body),
   setCustomCode: (id: string, body: CustomCode) =>
     api.post<{ success: boolean }>(`/sites/${id}/custom-code`, body),
 };

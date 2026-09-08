@@ -39,7 +39,9 @@ import { showConfirm } from "../../telegram/webapp";
 type Tab = "stats" | "users" | "tariffs" | "domains" | "zone" | "about";
 
 const DURATIONS: TariffDuration[] = ["month", "3month", "6month", "12month", "forever"];
-const KINDS: TariffKind[] = ["base", "pro"];
+// custom_code — не подписка, а разовая покупка возможности своего кода.
+// Строка одна, и админ меняет в ней цену: этого и просил заказчик.
+const KINDS: TariffKind[] = ["base", "pro", "custom_code"];
 
 export function AdminPage() {
   const { t } = useTranslation();
@@ -440,10 +442,19 @@ function TariffsTab() {
           <div key={tariff.id} className="card">
             <div className="card-row">
               <div className="grow">
-                <div className="card-title">{tariff.name}</div>
+                <div className="row" style={{ gap: 6 }}>
+                  <span className="card-title">{tariff.name}</span>
+                  {tariff.kind === "custom_code" ? (
+                    <Badge kind="accent">{t("admin.tariffs.oneTime")}</Badge>
+                  ) : null}
+                </div>
                 <div className="card-sub row" style={{ gap: 5 }}>
-                  <GramAmount value={tariff.price_ton} size={13} /> ·{" "}
-                  {t(`tariffs.duration.${tariff.duration}`)} · {tariff.sites_limit}
+                  <GramAmount value={tariff.price_ton} size={13} />
+                  {tariff.kind === "custom_code" ? null : (
+                    <>
+                      · {t(`tariffs.duration.${tariff.duration}`)} · {tariff.sites_limit}
+                    </>
+                  )}
                 </div>
               </div>
               <Badge kind={tariff.is_active ? "success" : "default"}>

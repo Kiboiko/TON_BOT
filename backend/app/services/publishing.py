@@ -63,7 +63,8 @@ def build_site_html(site: Site) -> str:
     return render_site(
         site.content_json,
         title=site.title,
-        custom_code=site.custom_code,
+        # свой код оплачивается разово: неоплаченный на страницу не попадает
+        custom_code=site.custom_code if site.custom_code_paid else None,
         domain=site.domain,
         site_type=site.type.value,
     )

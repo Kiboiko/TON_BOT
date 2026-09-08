@@ -118,6 +118,7 @@ class SiteOut(ORMModel):
     title: str
     content_json: dict[str, Any]
     custom_code: dict[str, Any] | None = None
+    custom_code_paid: bool = False
     domain: str | None = None
     dns_item_address: str | None = None
     collection_address: str | None = None
@@ -126,6 +127,17 @@ class SiteOut(ORMModel):
     published_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class CustomCodePriceResponse(BaseModel):
+    """Цена разовой покупки своего кода и признак «уже оплачено»."""
+
+    price_ton: Decimal
+    paid: bool
+
+    @field_serializer("price_ton")
+    def _price(self, value: Decimal) -> str:
+        return format_ton(value) or "0"
 
 
 class SiteListItem(ORMModel):

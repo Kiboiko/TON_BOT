@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 
 from app.core.db import SessionLocal
 from app.models import Subscription, Tariff, TariffDuration, TariffKind, User
-from app.seed import TIERS, default_tariffs, seed
+from app.seed import CUSTOM_CODE_TARIFF, TIERS, default_tariffs, seed
 from tests.conftest import headers_for
 
 ALL_DURATIONS = {
@@ -50,7 +50,8 @@ async def test_seed_is_idempotent(db) -> None:
 
     async with SessionLocal() as session:
         total = await session.scalar(select(func.count()).select_from(Tariff))
-        assert total == len(default_tariffs())
+        # сетка подписок плюс одна строка с ценой разовой покупки «Своего кода»
+        assert total == len(default_tariffs()) + 1
 
         # витрина: у каждого тарифа ровно пять вариантов оплаты
         for tier in TIERS:
@@ -103,7 +104,7 @@ async def test_legacy_tariffs_are_renamed_not_recreated(db) -> None:
 
         assert await session.scalar(select(func.count()).select_from(Tariff)) == len(
             default_tariffs()
-        )
+        ) + 1
 
 
 @pytest.mark.asyncio
@@ -117,3 +118,27 @@ async def test_storefront_shows_grid_without_custom_code(client) -> None:
     assert len(tariffs) == len(TIERS) * len(ALL_DURATIONS)
     # порядок: сначала младшие тарифы — витрина строит карточки в этом порядке
     assert [t["sites_limit"] for t in tariffs] == sorted(t["sites_limit"] for t in tariffs)
+
+
+@pytest.mark.asyncio
+async def test_custom_code_price_is_not_reset_by_seed(db) -> None:
+    """Цену разовой покупки задаёт админ — повторный сид не должен её сбрасывать."""
+    await seed()
+
+    async with SessionLocal() as session:
+        tariff = await session.scalar(
+            select(Tariff).where(Tariff.kind == TariffKind.custom_code)
+        )
+        assert tariff is not None
+        assert tariff.price_ton == CUSTOM_CODE_TARIFF["price_ton"]
+        tariff.price_ton = Decimal("9")
+        await session.commit()
+
+    await seed()
+
+    async with SessionLocal() as session:
+        tariff = await session.scalar(
+            select(Tariff).where(Tariff.kind == TariffKind.custom_code)
+        )
+        assert tariff.price_ton == Decimal("9")
+        assert tariff.is_active is True

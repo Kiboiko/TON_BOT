@@ -145,9 +145,9 @@ function sitesLimit(): number {
   return Math.max(1, ...activeSubscriptions(state).map((s) => s.tariff?.sites_limit ?? 1));
 }
 
-/** «Свой код» открывает подписка; пробный период — нет, как и на backend. */
-function hasPaidSubscription(state: MockState): boolean {
-  return activeSubscriptions(state).some((s) => !s.is_trial);
+/** Цена разовой покупки своего кода — как и на backend, из тарифа custom_code. */
+function customCodePrice(state: MockState): string {
+  return state.tariffs.find((t) => t.kind === "custom_code")?.price_ton ?? "5";
 }
 
 function toListItem(site: Site): SiteListItem {
@@ -210,15 +210,13 @@ async function handler(method: Method, path: string, options: RequestOptions): P
       fail(403, "LIMIT_EXCEEDED", `Достигнут лимит сайтов (${sitesLimit()})`);
     }
     const input = body as unknown as { type: SiteType; title: string };
-    if (input.type === "custom_code" && !hasPaidSubscription(state)) {
-      fail(402, "SUBSCRIPTION_REQUIRED", "Нужна активная подписка");
-    }
     const site: Site = {
       id: uuid(),
       type: input.type,
       title: input.title,
       content_json: defaultContentFor(input.type, input.title),
       custom_code: null,
+      custom_code_paid: false,
       domain: null,
       dns_item_address: null,
       collection_address: null,
@@ -280,12 +278,24 @@ async function handler(method: Method, path: string, options: RequestOptions): P
       };
     }
     if (tail === "/dns-bind") return { transaction: fakeTransaction("0.05") };
+    if (tail === "/custom-code/price") {
+      return { price_ton: customCodePrice(state), paid: site.custom_code_paid };
+    }
+    if (tail === "/custom-code/purchase") {
+      if (site.custom_code_paid) fail(409, "CUSTOM_CODE_PAID", "Уже оплачено");
+      return { transaction: fakeTransaction(customCodePrice(state)), payment_id: uuid() };
+    }
+    if (tail === "/custom-code/confirm") {
+      site.custom_code_paid = true;
+      save(state);
+      return { success: true };
+    }
     if (tail === "/custom-code") {
       if (site.type !== "custom_code") {
         fail(400, "NOT_A_CUSTOM_CODE_SITE", "Свой код доступен только в проекте этого типа");
       }
-      if (!hasPaidSubscription(state)) {
-        fail(402, "SUBSCRIPTION_REQUIRED", "Нужна активная подписка");
+      if (!site.custom_code_paid) {
+        fail(402, "CUSTOM_CODE_NOT_PAID", "Свой код для этого сайта не оплачен");
       }
       site.custom_code = body as unknown as Site["custom_code"];
       save(state);

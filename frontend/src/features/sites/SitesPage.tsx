@@ -61,13 +61,6 @@ export function SitesPage() {
         setLimitReached(true);
         setCreating(false);
       }
-      // тип «Свой код» открывает подписка — ведём на тарифы, а не просто ругаемся
-      if (error instanceof ApiError && error.code === "SUBSCRIPTION_REQUIRED") {
-        setCreating(false);
-        toastError(error);
-        navigate("/tariffs");
-        return;
-      }
       toastError(error);
     } finally {
       setBusy(false);
@@ -184,7 +177,7 @@ export function SitesPage() {
                   <div className="card-title">{tpl.title[language]}</div>
                   <div className="card-sub">{tpl.description[language]}</div>
                 </div>
-                {tpl.subscriptionOnly ? <Badge kind="accent">{t("sites.subscriptionOnly")}</Badge> : null}
+                {tpl.paidOnce ? <Badge kind="accent">{t("sites.paidOnce")}</Badge> : null}
               </div>
             </div>
           ))}

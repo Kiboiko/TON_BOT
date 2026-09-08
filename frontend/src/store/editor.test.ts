@@ -15,6 +15,7 @@ const site: Site = {
   title: "Мой сайт",
   content_json: defaultContentFor("links", "Мой сайт"),
   custom_code: null,
+  custom_code_paid: false,
   domain: null,
   dns_item_address: null,
   collection_address: null,
