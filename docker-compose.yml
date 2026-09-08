@@ -156,7 +156,7 @@ services:
         echo "TON_SITE_ADNL=$$addr"
         # -L '*' — один адрес на все домены платформы: какой сайт отдать,
         # решает заголовок Host уже в nginx.
-        exec rldp-http-proxy -v 2 -C /var/ton-work/global.config.json           -a $${TON_SITE_ADNL_ADDR:-0.0.0.0:3335} -A $$addr -L '*' -D $$db
+        exec rldp-http-proxy -v 2 -C /var/ton-work/global.config.json           -a ${TON_SITE_ADNL_ADDR:-0.0.0.0:3335} -A $$addr -L '*' -D $$db
     volumes:
       - ton_site_data:/var/ton-work/db
       - ./storage/global.config.json:/var/ton-work/global.config.json:ro
