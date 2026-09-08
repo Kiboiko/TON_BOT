@@ -56,6 +56,8 @@ export const sitesApi = {
   publish: (id: string) => api.post<{ status: string; job_id: string }>(`/sites/${id}/publish`),
   publishStatus: (id: string) => api.get<PublishStatus>(`/sites/${id}/publish-status`),
   dnsBind: (id: string) => api.post<{ transaction: TonConnectTransaction }>(`/sites/${id}/dns-bind`),
+  siteBind: (id: string) =>
+    api.post<{ transaction: TonConnectTransaction }>(`/sites/${id}/site-bind`),
 
   // проект типа «Свой код»: код доступен по подписке
   setCustomCode: (id: string, body: CustomCode) =>

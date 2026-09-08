@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import timezone
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -27,15 +29,33 @@ log = logging.getLogger(__name__)
 JOB_PUBLISH_SITE = "publish_site"
 
 
+def publish_is_stale(site: Site) -> bool:
+    """Публикация занимает секунды. Дольше — задача потеряна (упал воркер,
+    оборвался Redis), и сайт нужно вытаскивать из «публикуется»."""
+    started = site.updated_at
+    if started is None:
+        return True
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return (utcnow() - started).total_seconds() > settings.PUBLISH_STALE_SECONDS
+
+
 async def enqueue_publish(session: AsyncSession, site: Site) -> str:
-    """Переводит сайт в publishing и ставит задачу в очередь."""
+    """Переводит сайт в publishing и ставит задачу в очередь.
+
+    Статус коммитится ДО постановки в очередь. Воркер работает в своей сессии и
+    успевает опубликовать сайт за десятки миллисекунд — раньше, чем закончится
+    HTTP-запрос. Пока `publishing` жил во всё ещё открытой транзакции запроса,
+    её коммит ложился поверх результата воркера и затирал `published`: сайт
+    оставался в «публикуется» навсегда, хотя bag уже был залит.
+    """
     site.status = SiteStatus.publishing
     site.publish_error = None
-    await session.flush()
+    await session.commit()
 
     job_id = await get_queue().enqueue(JOB_PUBLISH_SITE, {"site_id": str(site.id)})
     site.publish_job_id = job_id
-    await session.flush()
+    await session.commit()
     return job_id
 
 
@@ -84,11 +104,22 @@ async def run_publish_job(site_id: str | uuid.UUID) -> None:
     «публикуется»: результат публикации так и не сохранялся.
     """
     site_uuid = site_id if isinstance(site_id, uuid.UUID) else uuid.UUID(str(site_id))
+    try:
+        outcome = await _run_publish(site_uuid)
+    except Exception:  # noqa: BLE001 — сайт не должен остаться в «публикуется»
+        log.exception("publish job for site %s crashed", site_uuid)
+        await _mark_publish_error(site_uuid, "Внутренняя ошибка публикации")
+        return
+    if outcome is not None:
+        await _notify_publish_result(outcome)
+
+
+async def _run_publish(site_uuid: uuid.UUID) -> dict[str, Any] | None:
     async with SessionLocal() as session:
         site = await session.get(Site, site_uuid)
         if site is None:
             log.warning("publish job: site %s not found", site_uuid)
-            return
+            return None
         await publish_site(session, site)
         user = await session.get(User, site.user_id)
         # значения снимаем до коммита: после него атрибуты нужно было бы перечитывать
@@ -102,8 +133,42 @@ async def run_publish_job(site_id: str | uuid.UUID) -> None:
             "error": site.publish_error,
         }
         await session.commit()
+    return outcome
 
-    await _notify_publish_result(outcome)
+
+async def _mark_publish_error(site_uuid: uuid.UUID, reason: str) -> None:
+    """Аварийно снимает сайт с «публикуется», если задача упала целиком."""
+    async with SessionLocal() as session:
+        site = await session.get(Site, site_uuid)
+        if site is None or site.status != SiteStatus.publishing:
+            return
+        site.status = SiteStatus.publish_error
+        site.publish_error = reason
+        await session.commit()
+
+
+async def recover_stale_publishes() -> int:
+    """Возвращает зависшие публикации в publish_error.
+
+    Задача может пропасть безвозвратно: воркер снимает её из Redis через BLPOP
+    и, если падает следом, вернуть её уже некому. Без этого прохода сайт вечно
+    показывает спиннер, а кнопка «Опубликовать» упирается в 409.
+    """
+    recovered = 0
+    async with SessionLocal() as session:
+        rows = await session.scalars(
+            select(Site).where(Site.status == SiteStatus.publishing)
+        )
+        for site in rows.all():
+            if not publish_is_stale(site):
+                continue
+            site.status = SiteStatus.publish_error
+            site.publish_error = "Публикация прервалась — попробуйте ещё раз"
+            recovered += 1
+        if recovered:
+            await session.commit()
+            log.warning("recovered %s stale publish(es)", recovered)
+    return recovered
 
 
 async def _notify_publish_result(outcome: dict[str, Any]) -> None:

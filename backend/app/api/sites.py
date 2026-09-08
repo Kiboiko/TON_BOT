@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import timezone
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
@@ -32,8 +31,8 @@ from app.schemas import (
 )
 from app.services import subscriptions as subs_service
 from app.api.public import public_site_url
-from app.services.dns import build_set_storage_transaction
-from app.services.publishing import build_site_html, enqueue_publish
+from app.services.dns import build_set_site_transaction, build_set_storage_transaction
+from app.services.publishing import build_site_html, enqueue_publish, publish_is_stale
 from app.services.renderer import content_size, default_content_for, render_site
 
 router = APIRouter(prefix="/sites", tags=["sites"])
@@ -53,15 +52,6 @@ def _ensure_custom_code_site(site: Site) -> None:
             "Custom code is only available for sites of type custom_code",
             code="NOT_A_CUSTOM_CODE_SITE",
         )
-
-
-def _publish_is_stale(site: Site) -> bool:
-    started = site.updated_at
-    if started is None:
-        return True
-    if started.tzinfo is None:
-        started = started.replace(tzinfo=timezone.utc)
-    return (utcnow() - started).total_seconds() > settings.PUBLISH_STALE_SECONDS
 
 
 def _check_content_size(content: dict | None) -> None:
@@ -152,7 +142,7 @@ async def publish(session: SessionDep, user: CurrentUser, site_id: uuid.UUID) ->
     # Публикация занимает секунды. Если статус висит дольше, задача потеряна
     # (упал воркер, зависла сеть) — иначе из этого состояния было бы не выйти:
     # кнопка «Опубликовать» вечно отвечала бы 409.
-    if site.status == SiteStatus.publishing and not _publish_is_stale(site):
+    if site.status == SiteStatus.publishing and not publish_is_stale(site):
         raise Conflict("Site is already being published", code="PUBLISH_IN_PROGRESS")
     await subs_service.ensure_can_publish(session, user, site)
 
@@ -184,6 +174,23 @@ async def dns_bind(
     if not site.storage_bag_id:
         raise BadRequest("Site is not published yet", code="SITE_NOT_PUBLISHED")
     tx = build_set_storage_transaction(site.dns_item_address or "", site.storage_bag_id)
+    return DnsBindResponse(transaction=TonConnectTransaction(**tx.to_tonconnect()))
+
+
+@router.post("/{site_id}/site-bind", response_model=DnsBindResponse)
+async def site_bind(
+    session: SessionDep, user: CurrentUser, site_id: uuid.UUID
+) -> DnsBindResponse:
+    """Транзакция «направить домен на наш TON-сайт» (DNS-запись `site`).
+
+    Запись `storage` отдаёт сайт из TON Storage и зависит от чужих шлюзов;
+    запись `site` ведёт прямо на наш rldp-http-proxy, поэтому домен открывается,
+    пока жив наш сервер. Одно другому не мешает — записи разные.
+    """
+    site = await _get_site(session, site_id, user)
+    if site.status != SiteStatus.published:
+        raise BadRequest("Site is not published yet", code="SITE_NOT_PUBLISHED")
+    tx = build_set_site_transaction(site.dns_item_address or "", settings.TON_SITE_ADNL)
     return DnsBindResponse(transaction=TonConnectTransaction(**tx.to_tonconnect()))
 
 

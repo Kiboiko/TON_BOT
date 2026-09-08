@@ -393,3 +393,65 @@ async def test_republish_without_changes_is_not_an_error(tmp_path):
     info = await backend.upload_directory(site_dir)
     assert info.bag_id == bag
     assert info.files == 1
+
+
+# ---------------------------------------------------- TON Site (запись `site`)
+def test_adnl_address_roundtrip():
+    """Адрес .adnl декодируется в те же 32 байта, что печатает generate-random-id."""
+    from app.services.ton import decode_adnl_address
+
+    addr = "wi22d76kj67rstlzgihzurd5y4x2fmm5ymzsweteizwn7ty7xwwuhqm"
+    assert (
+        decode_adnl_address(addr).hex().upper()
+        == "91AD0FFE527DF8CA6BC9907CD223EE397D158CEE19995893223366FE78FDED6A"
+    )
+
+
+def test_adnl_address_rejects_broken_checksum():
+    """Опечатка в адресе не должна уехать в DNS-запись домена."""
+    from app.core.errors import BadRequest
+    from app.services.ton import decode_adnl_address
+
+    for bad in ("", "short", "wi22d76kj67rstlzgihzurd5y4x2fmm5ymzsweteizwn7ty7xwwuhq0"):
+        with pytest.raises(BadRequest):
+            decode_adnl_address(bad)
+
+
+def test_site_record_matches_tep81():
+    """dns_adnl_address#ad01 adnl_addr:bits256 flags:(## 8) proto_list:flags . 0?ProtoList."""
+    import base64
+
+    from pytoniq_core import Cell
+
+    from app.services.dns import CATEGORY_SITE, build_set_site_payload, dns_category_key
+
+    addr = "wi22d76kj67rstlzgihzurd5y4x2fmm5ymzsweteizwn7ty7xwwuhqm"
+    body = Cell.one_from_boc(base64.b64decode(build_set_site_payload(addr))).begin_parse()
+    assert body.load_uint(32) == 0x4EB1F0F9      # change_dns_record
+    assert body.load_uint(64) == 0
+    assert body.load_uint(256) == dns_category_key(CATEGORY_SITE)
+
+    value = body.load_maybe_ref().begin_parse()
+    assert value.load_uint(16) == 0xAD01         # dns_adnl_address
+    assert value.load_uint(256) == int.from_bytes(
+        bytes.fromhex("91AD0FFE527DF8CA6BC9907CD223EE397D158CEE19995893223366FE78FDED6A"), "big"
+    )
+    assert value.load_uint(8) == 1               # flags: дальше proto_list
+    assert value.load_bit() == 1                 # proto_list_next
+    assert value.load_uint(16) == 0x4854         # proto_http
+    assert value.load_bit() == 0                 # proto_list_nil
+
+
+async def test_site_bind_needs_published_site(client):
+    """Пока сайт не опубликован, направлять на него домен нечем."""
+    from tests.conftest import headers_for
+
+    h = headers_for(7701)
+    await client.post("/api/user/auth", headers=h, json={})
+    site_id = (
+        await client.post("/api/sites", headers=h, json={"type": "visitka", "title": "S"})
+    ).json()["site"]["id"]
+
+    resp = await client.post(f"/api/sites/{site_id}/site-bind", headers=h)
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "SITE_NOT_PUBLISHED"

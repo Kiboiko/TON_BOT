@@ -14,6 +14,7 @@ import signal
 from app.core.config import settings
 from app.core.db import SessionLocal
 from app.services.notifications import close_transport
+from app.services.publishing import recover_stale_publishes
 from app.services.subscriptions import refresh_statuses
 
 logging.basicConfig(
@@ -46,6 +47,8 @@ async def run_once() -> dict[str, int]:
     async with SessionLocal() as session:
         stats = await refresh_statuses(session)
         await session.commit()
+    # сюда же — зависшие публикации: воркер мог упасть вместе с задачей
+    stats["publishes_recovered"] = await recover_stale_publishes()
     if any(stats.values()):
         log.info("subscriptions refreshed: %s", stats)
     return stats

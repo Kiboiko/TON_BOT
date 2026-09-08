@@ -425,3 +425,97 @@ def test_publish_error_message_is_never_empty():
 
     assert describe_error(NotImplementedError()) == "NotImplementedError"
     assert describe_error(ValueError("нет связи")) == "нет связи"
+
+
+# ---------------------------------------------------------------- публикация
+async def test_worker_result_survives_request_commit(client):
+    """Воркер успевает опубликовать сайт до конца HTTP-запроса.
+
+    Раньше статус `publishing` жил в незакрытой транзакции запроса, и её коммит
+    ложился поверх `published` от воркера — сайт навсегда застревал в
+    «публикуется». Здесь воркер отрабатывает прямо в момент постановки задачи.
+    """
+    from app.services.publishing import run_publish_job
+    from app.workers.queue import get_queue
+
+    h = headers_for(4101)
+    await client.post("/api/user/auth", headers=h, json={})
+    site_id = (
+        await client.post("/api/sites", headers=h, json={"type": "visitka", "title": "гонка"})
+    ).json()["site"]["id"]
+
+    queue = get_queue()
+    original = queue.enqueue
+
+    async def enqueue_and_run(name, payload):
+        job_id = await original(name, payload)
+        await run_publish_job(payload["site_id"])  # воркер обгоняет запрос
+        return job_id
+
+    queue.enqueue = enqueue_and_run
+    try:
+        resp = await client.post(f"/api/sites/{site_id}/publish", headers=h)
+    finally:
+        queue.enqueue = original
+    assert resp.status_code == 200
+
+    status = (await client.get(f"/api/sites/{site_id}/publish-status", headers=h)).json()
+    assert status["status"] == "published"
+    assert status["storage_bag_id"]
+
+
+async def test_stale_publish_is_recovered(client):
+    """Потерянная задача не оставляет сайт в «публикуется» навсегда."""
+    import uuid as _uuid
+
+    from app.services.publishing import recover_stale_publishes
+
+    h = headers_for(4102)
+    await client.post("/api/user/auth", headers=h, json={})
+    site_id = (
+        await client.post("/api/sites", headers=h, json={"type": "visitka", "title": "зависший"})
+    ).json()["site"]["id"]
+
+    async with SessionLocal() as session:
+        site = await session.get(Site, _uuid.UUID(site_id))
+        site.status = SiteStatus.publishing
+        site.updated_at = utcnow() - timedelta(hours=1)
+        await session.commit()
+
+    assert await recover_stale_publishes() == 1
+    status = (await client.get(f"/api/sites/{site_id}/publish-status", headers=h)).json()
+    assert status["status"] == "publish_error"
+    # и кнопка «Опубликовать» снова доступна
+    assert (await client.post(f"/api/sites/{site_id}/publish", headers=h)).status_code == 200
+
+
+async def test_ton_site_serves_by_host(client):
+    """Отдача в сеть TON: какой сайт показать — решает заголовок Host.
+
+    Один ADNL-адрес обслуживает все домены платформы, поэтому путь запроса
+    ничего не выбирает, а нужный сайт ищется по домену.
+    """
+    import uuid as _uuid
+
+    h = headers_for(4103)
+    await client.post("/api/user/auth", headers=h, json={})
+    site_id = (
+        await client.post("/api/sites", headers=h, json={"type": "visitka", "title": "Витрина"})
+    ).json()["site"]["id"]
+
+    async with SessionLocal() as session:
+        site = await session.get(Site, _uuid.UUID(site_id))
+        site.domain = "shop.ton"
+        await session.commit()
+
+    from app.services.publishing import run_publish_job
+
+    await run_publish_job(site_id)
+
+    ok = await client.get("/ton-site/", headers={"Host": "shop.ton"})
+    assert ok.status_code == 200
+    assert "Витрина" in ok.text
+
+    # чужой домен не должен отдавать чужой сайт
+    missing = await client.get("/ton-site/", headers={"Host": "other.ton"})
+    assert missing.status_code == 404

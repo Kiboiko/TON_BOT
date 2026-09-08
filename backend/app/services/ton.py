@@ -22,7 +22,7 @@ from typing import Any, Protocol
 import httpx
 
 from app.core.config import settings
-from app.core.errors import TonApiError
+from app.core.errors import BadRequest, TonApiError
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +56,33 @@ def to_user_friendly(address: str, *, bounceable: bool = True) -> str:
         )
     except Exception:  # noqa: BLE001 - не наш адрес: отдаём как есть, провалидирует кошелёк
         return address
+
+
+ADNL_ADDRESS_LEN = 55
+
+
+def decode_adnl_address(address: str) -> bytes:
+    """user-friendly ADNL адрес (55 символов) → 32 байта.
+
+    Формат тот же, что у `.adnl`-хостов: base32 от 35 байт `0x2d | id | crc16`,
+    у которых отброшен первый символ. Проверяем и длину, и контрольную сумму —
+    опечатка в адресе иначе уехала бы в DNS-запись домена.
+    """
+    from pytoniq_core.crypto.crc import crc16
+
+    value = (address or "").strip().lower()
+    if len(value) != ADNL_ADDRESS_LEN:
+        raise BadRequest("Invalid ADNL address", code="INVALID_ADNL_ADDRESS")
+    padded = ("f" + value).upper()
+    try:
+        raw = base64.b32decode(padded + "=" * (-len(padded) % 8))
+    except (ValueError, binascii.Error) as exc:
+        raise BadRequest("Invalid ADNL address", code="INVALID_ADNL_ADDRESS") from exc
+    if len(raw) != 35 or raw[0] != 0x2D:
+        raise BadRequest("Invalid ADNL address", code="INVALID_ADNL_ADDRESS")
+    if crc16(raw[:33]) != raw[33:]:
+        raise BadRequest("Invalid ADNL address", code="INVALID_ADNL_ADDRESS")
+    return raw[1:33]
 
 
 def normalize_address(address: str) -> str:

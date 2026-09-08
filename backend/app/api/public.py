@@ -14,12 +14,14 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from app.core.config import settings
 from app.core.db import SessionLocal
 from app.core.errors import NotFound
+from sqlalchemy import select
+
 from app.models import Site, SiteStatus
 from app.services.publishing import build_site_html
 
@@ -56,4 +58,40 @@ async def serve_site(site_id: uuid.UUID) -> HTMLResponse:
             # чужой HTML не должен утаскивать реферер платформы
             "Referrer-Policy": "no-referrer",
         },
+    )
+
+
+async def _published_html(site: Site) -> str:
+    """Отдаём ровно то, что ушло в хранилище; файла нет — рисуем из content_json."""
+    index = Path(settings.SITES_BUILD_DIR) / str(site.id) / "index.html"
+    try:
+        return index.read_text(encoding="utf-8")
+    except OSError:
+        return build_site_html(site)
+
+
+@router.get("/ton-site", response_class=HTMLResponse, include_in_schema=False)
+@router.get("/ton-site/{path:path}", response_class=HTMLResponse, include_in_schema=False)
+async def serve_ton_site(request: Request, path: str = "") -> HTMLResponse:
+    """Отдача сайта в сеть TON: домен берётся из заголовка Host.
+
+    Сюда nginx направляет всё, что пришло из TON через rldp-http-proxy. Один
+    ADNL-адрес обслуживает все домены платформы, поэтому какой именно сайт
+    показать — решает Host, а не путь.
+    """
+    host = (request.headers.get("host") or "").split(":")[0].strip().lower()
+    if not host:
+        raise NotFound("Unknown domain", code="DOMAIN_UNKNOWN")
+
+    async with SessionLocal() as session:
+        site = await session.scalar(
+            select(Site).where(Site.domain == host, Site.status == SiteStatus.published)
+        )
+        if site is None:
+            raise NotFound("No published site on this domain", code="SITE_NOT_PUBLISHED")
+        html = await _published_html(site)
+
+    return HTMLResponse(
+        html,
+        headers={"Cache-Control": "public, max-age=60", "Referrer-Policy": "no-referrer"},
     )

@@ -184,6 +184,18 @@ export function PublishPage() {
     }
   }
 
+  // Вторая, независимая запись домена: она ведёт прямо на наш сервер, поэтому
+  // сайт открывается, даже когда публичные шлюзы TON Storage не отвечают.
+  async function bindSite(): Promise<void> {
+    try {
+      const { transaction } = await sitesApi.siteBind(siteId);
+      const result = await payment.pay(transaction, async () => ({ ok: true }));
+      if (result) toast(t("publish.bound"), "success");
+    } catch (error) {
+      toastError(error);
+    }
+  }
+
   if (!site) return <Loading text={t("common.loading")} />;
 
   return (
@@ -388,6 +400,12 @@ export function PublishPage() {
                 </div>
                 <Button block onClick={() => void bindDns()}>
                   🔗 {t("publish.bindDns")}
+                </Button>
+                <div className="card-sub" style={{ margin: "12px 0 6px" }}>
+                  {t("publish.bindSiteHint")}
+                </div>
+                <Button block variant="ghost" onClick={() => void bindSite()}>
+                  🌐 {t("publish.bindSite")}
                 </Button>
               </div>
             ) : null}

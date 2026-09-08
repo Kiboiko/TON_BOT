@@ -83,6 +83,11 @@ class Settings(BaseSettings):
 
     # --- TON Storage ---
     # daemon — настоящий ton-storage-daemon, local — выкладка в каталог (dev)
+    # ADNL-адрес нашего rldp-http-proxy (55 символов, как у .adnl-хостов).
+    # Домен .ton с DNS-записью `site` на этот адрес открывается TON-браузерами
+    # напрямую с нашего сервера — без публичных шлюзов.
+    TON_SITE_ADNL: str = ""
+
     TON_STORAGE_MODE: Literal["daemon", "local"] = "local"
     # У демона нет HTTP API: управление идёт утилитой storage-daemon-cli
     # по управляющему порту, ключи демон генерирует сам при первом старте.

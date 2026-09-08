@@ -12,6 +12,9 @@ x-backend: &backend
     - uploads_data:/data/uploads
     # ключи storage-daemon-cli, которые демон генерирует при первом старте
     - storage_data:/var/ton-work/db
+  # storage-daemon живёт в сети хоста, поэтому по имени сервиса он не виден
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
   restart: unless-stopped
 
 services:
@@ -113,8 +116,52 @@ services:
       - sites_data:/data/sites
       - storage_data:/var/ton-work/db
       - ./storage/global.config.json:/var/ton-work/global.config.json:ro
-    ports:
-      - "3333:3333/udp"
+    # Сеть хоста, а не проброс порта: ADNL — это UDP, и NAT докера ломает обмен
+    # с остальной сетью. Демон виден снаружи, но бэги при этом никто не качает.
+    # Управляющий порт 5555 при таком режиме тоже слушает на хосте — доступ к
+    # нему закрыт ключами клиента, но наружу его лучше прикрыть файрволом.
+    network_mode: host
+    healthcheck: {disable: true}
+    restart: unless-stopped
+    profiles: ["storage"]
+
+  # TON-сайт: принимает запросы из сети TON по ADNL и отдаёт их nginx.
+  # Домен .ton с DNS-записью `site` на этот ADNL-адрес открывается напрямую с
+  # нашего сервера, без публичных шлюзов вроде ton.website (они отдают только
+  # TON Storage и не всегда справляются с новыми бэгами).
+  ton-site:
+    image: ${TON_STORAGE_IMAGE:-ghcr.io/ton-blockchain/ton:latest}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        db=/var/ton-work/db
+        mkdir -p $$db/keyring
+        # Ключ создаётся один раз и переживает пересоздание контейнера: адрес
+        # прописан в DNS домена, менять его нельзя без новой подписи владельца.
+        if [ ! -f $$db/adnl.addr ]; then
+          generate-random-id -m keys -n $$db/adnl.key > $$db/adnl.ids
+          hex=$$(cut -d' ' -f1 $$db/adnl.ids)
+          cp $$db/adnl.key $$db/keyring/$$hex
+          generate-random-id -m adnlid -k $$db/adnl.key | cut -d' ' -f2 > $$db/adnl.addr
+        fi
+        addr=$$(cat $$db/adnl.addr)
+        # 55 символов — иначе rldp-http-proxy падает с «Wrong length of adnl id»,
+        # и контейнер молча уходит в бесконечный перезапуск
+        if [ $${#addr} -ne 55 ]; then
+          echo "ton-site: не удалось получить ADNL-адрес (получено: '$$addr')" >&2
+          rm -f $$db/adnl.addr
+          exit 1
+        fi
+        echo "TON_SITE_ADNL=$$addr"
+        # -L '*' — один адрес на все домены платформы: какой сайт отдать,
+        # решает заголовок Host уже в nginx.
+        exec rldp-http-proxy -v 2 -C /var/ton-work/global.config.json           -a $${TON_SITE_ADNL_ADDR:-0.0.0.0:3335} -A $$addr -L '*' -D $$db
+    volumes:
+      - ton_site_data:/var/ton-work/db
+      - ./storage/global.config.json:/var/ton-work/global.config.json:ro
+    # Как и у storage-daemon: ADNL поверх UDP, NAT докера его ломает.
+    network_mode: host
     healthcheck: {disable: true}
     restart: unless-stopped
     profiles: ["storage"]
@@ -134,6 +181,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  ton_site_data:
   pg_data:
   uploads_data:
   redis_data:

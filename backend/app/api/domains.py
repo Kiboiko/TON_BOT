@@ -31,7 +31,7 @@ from app.schemas import (
     TonConnectTransaction,
 )
 from app.services.dns_resolver import get_resolver, is_valid_name
-from app.services.publishing import enqueue_publish
+from app.services.publishing import enqueue_publish, publish_is_stale
 from app.services.subdom_client import get_domain_service
 from app.services.ton import same_address
 from app.services.zone import full_domain, get_zone
@@ -180,6 +180,9 @@ async def confirm_domain(
 
     if info.item_address:
         site.dns_item_address = info.item_address
-    if site.status != SiteStatus.publishing:
+    # если предыдущая задача потерялась, сайт так и висит в publishing —
+    # отвечать «публикуется» и не ставить новую значило бы обречь фронт на
+    # бесконечный поллинг
+    if site.status != SiteStatus.publishing or publish_is_stale(site):
         await enqueue_publish(session, site)
     return DomainConfirmResponse(status=SiteStatus.publishing.value, domain=site.domain)

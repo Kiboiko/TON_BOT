@@ -153,6 +153,8 @@ export const en: Translations = {
     bagId: "TON Storage bag id",
     bindDns: "Bind to domain",
     bindHint: "Sign a transaction so the domain serves the new version",
+    bindSite: "Enable direct delivery",
+    bindSiteHint: "The domain will open straight from our server, bypassing public gateways",
     bound: "Domain updated",
     openSite: "Open site",
     openHint: "A plain link that works in any browser. The .ton domain opens in a TON browser once bound.",
