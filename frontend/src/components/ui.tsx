@@ -1,6 +1,7 @@
 /** Небольшой UI-кит: всё, что переиспользуется между экранами. */
 import type { ChangeEvent, ReactNode } from "react";
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useAppStore } from "../store/app";
 import { haptic } from "../telegram/webapp";
 
@@ -323,14 +324,18 @@ export function Sheet({
   }, [open, onClose]);
 
   if (!open) return null;
-  return (
+  // Портал в body: внутри страницы шторку мог бы «присвоить» любой предок с
+  // трансформацией или фильтром — тогда position:fixed считается от него, и
+  // окно прилипает к низу контента вместо низа экрана.
+  return createPortal(
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-handle" />
         {title ? <div className="sheet-title">{title}</div> : null}
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -364,7 +369,7 @@ export function Toasts() {
   const toasts = useAppStore((s) => s.toasts);
   const dismiss = useAppStore((s) => s.dismissToast);
   if (!toasts.length) return null;
-  return (
+  return createPortal(
     <div className="toasts">
       {toasts.map((toast) => (
         <div
@@ -376,6 +381,7 @@ export function Toasts() {
           {toast.text}
         </div>
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 }

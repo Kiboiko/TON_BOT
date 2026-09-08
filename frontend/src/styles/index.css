@@ -105,6 +105,8 @@ select {
 .app-scroll {
   flex: 1 1 auto;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
@@ -112,6 +114,7 @@ select {
 }
 
 .page {
+  flex: 1 0 auto;
   padding: 16px 16px 24px;
   max-width: 720px;
   width: 100%;
@@ -122,14 +125,15 @@ select {
   animation: fade-in 0.2s ease both;
 }
 
+/* Только прозрачность: анимация transform делала бы .page containing block
+   для position:fixed внутри неё, и шторка прилипала бы к низу страницы,
+   а не экрана. */
 @keyframes fade-in {
   from {
     opacity: 0;
-    transform: translateY(4px);
   }
   to {
     opacity: 1;
-    transform: none;
   }
 }
 
@@ -438,9 +442,16 @@ select {
 }
 
 /* --- модальные окна / шторки --- */
+/* inset:0 растянул бы подложку на весь layout viewport, а он в Telegram выше
+   видимой части экрана: низ шторки вместе с кнопкой уезжал за край. Меряем той
+   же высотой, что и сам каркас приложения. */
 .sheet-backdrop {
   position: fixed;
-  inset: 0;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 100vh;
+  height: var(--app-height, 100dvh);
   background: rgba(0, 0, 0, 0.45);
   z-index: 40;
   display: flex;
@@ -454,7 +465,7 @@ select {
   max-width: 720px;
   border-radius: 20px 20px 0 0;
   padding: 16px 16px calc(20px + env(safe-area-inset-bottom));
-  max-height: 88vh;
+  max-height: 88%;
   overflow-y: auto;
   animation: slide-up 0.22s cubic-bezier(0.2, 0.9, 0.3, 1) both;
 }
@@ -484,12 +495,16 @@ select {
 /* --- тосты --- */
 .toasts {
   position: fixed;
-  left: 12px;
-  right: 12px;
-  bottom: calc(76px + env(safe-area-inset-bottom));
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 100vh;
+  height: var(--app-height, 100dvh);
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   gap: 8px;
+  padding: 0 12px calc(76px + env(safe-area-inset-bottom));
   z-index: 60;
   pointer-events: none;
 }
