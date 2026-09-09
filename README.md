@@ -24,12 +24,16 @@ Telegram Mini App для создания и публикации мини-са�
 ## Запуск
 
 ```bash
-cp backend/.env.example backend/.env   # заполнить значения
+cp .env.example .env                   # пароль БД и адреса узлов TON
+cp backend/.env.example backend/.env   # настройки приложения
 docker compose up -d --build           # backend, воркеры, бот, БД, nginx
 curl localhost/health
 
 cd frontend && npm ci && npm run build # Mini App → frontend/dist, его отдаёт nginx
 ```
+
+Полное развёртывание на своём сервере, со всеми шагами и приёмкой —
+[docs/DEPLOY.md](docs/DEPLOY.md).
 
 Посмотреть интерфейс без backend: `cd frontend && npm install && npm run dev` —
 приложение поднимется против встроенного мока API-контракта.
