@@ -96,7 +96,11 @@ select {
    за пределы экрана, и до кнопок приходилось долго скроллить. */
 .app {
   height: 100vh;
-  height: var(--app-height, 100dvh);
+  /* dvh — ровно видимая область: учитывает и системные панели, и клавиатуру.
+     Считать высоту в JS из viewportStableHeight оказалось хуже: Telegram отдаёт
+     её без системной навигации, а нижнее меню и так отступает от неё через
+     safe-area — снизу оставалась чёрная полоса. */
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;

@@ -18,8 +18,6 @@ export function isTelegram(): boolean {
 }
 
 export function initTelegram(): void {
-  applyViewportHeight();
-  window.addEventListener("resize", applyViewportHeight);
   if (!available) return;
   WebApp.ready();
   WebApp.expand();
@@ -37,28 +35,18 @@ export function initTelegram(): void {
   } catch {
     /* не критично */
   }
-  WebApp.onEvent("viewportChanged", applyViewportHeight);
-  applyViewportHeight();
 }
 
-/**
- * Высота приложения в CSS-переменной `--app-height`.
+/*
+ * Высоту приложения задаёт CSS (100dvh), а не эта обёртка.
  *
- * На Android клавиатура и «схлопывание» шапки меняют видимую высоту, а
- * position:fixed продолжает считать от старой — из-за этого нижняя навигация
- * уезжала за экран и её приходилось искать скроллом. Держим точную высоту
- * сами и делаем каркас flex-колонкой без fixed-элементов.
+ * Раньше она приходила из viewportStableHeight. Оказалось, Telegram отдаёт её
+ * без учёта системной панели навигации, а нижнее меню и без того отступает от
+ * неё через env(safe-area-inset-bottom) — вычиталось дважды, и снизу оставалась
+ * чёрная полоса. Хуже того, при возврате из внешней ссылки значение приходило
+ * почти нулевым, и приложение схлопывалось в полоску. Динамическая единица
+ * измеряет ровно видимую область и не ломается ни в одном из этих случаев.
  */
-function applyViewportHeight(): void {
-  const reported = available
-    ? WebApp.viewportStableHeight || WebApp.viewportHeight || 0
-    : 0;
-  // берём меньшее: Telegram на Android отдаёт высоту видимой части, а окно
-  // webview выше неё; при открытой клавиатуре наоборот меньше окажется окно
-  const height = reported ? Math.min(reported, window.innerHeight) : window.innerHeight;
-  if (!height) return;
-  document.documentElement.style.setProperty("--app-height", `${Math.round(height)}px`);
-}
 
 export function getInitData(): string {
   if (!available) return "";
