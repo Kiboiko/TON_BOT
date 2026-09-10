@@ -11,11 +11,14 @@ import { TonConnectUIProvider } from "@tonconnect/ui-react";
 import { App } from "./App";
 import { enableMock } from "./api/mock";
 import { getInitData, isTelegram } from "./telegram/webapp";
+import { resolveManifestUrl } from "./tonconnect";
 import "./i18n";
 import "./styles/index.css";
 
-const MANIFEST_URL =
-  import.meta.env.VITE_TONCONNECT_MANIFEST ?? `${window.location.origin}/tonconnect-manifest.json`;
+const MANIFEST_URL = resolveManifestUrl(
+  import.meta.env.VITE_TONCONNECT_MANIFEST,
+  window.location.origin,
+);
 
 /**
  * Куда кошелёк возвращает пользователя после подписи.
