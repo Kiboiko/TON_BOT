@@ -426,27 +426,68 @@ docker compose up -d --force-recreate backend
 | 3335 | udp | ton-site: приём запросов из сети TON |
 
 Порт **5555/tcp** — управляющий канал storage-daemon. Он слушает на хосте
-(сервисы работают в сети хоста ради UDP) и наружу открыт быть не должен:
+(сервисы работают в сети хоста ради UDP), и доступ к нему даёт полный контроль
+над раздачей сайтов. Закрываем его службой systemd, которая ставит правила при
+каждой загрузке сервера:
 
 ```bash
-apt install -y iptables-persistent
+cat > /usr/local/sbin/tsb-firewall.sh <<'EOF'
+#!/bin/sh
+# Управляющий порт storage-daemon (5555/tcp) доступен только локально и из
+# контейнеров. Демон работает в сети хоста, поэтому порт слушает на всех
+# интерфейсах, а доступ к нему даёт полный контроль над раздачей сайтов.
+#
+# Правила ставит systemd при каждой загрузке. netfilter-persistent здесь не
+# используется намеренно: он сохранил бы и цепочки Docker со старыми адресами
+# контейнеров, а после перезагрузки восстановил бы их поверх свежих.
+set -e
+
+for rule in \
+  "-s 127.0.0.1/32 -p tcp --dport 5555 -j ACCEPT" \
+  "-s 172.16.0.0/12 -p tcp --dport 5555 -j ACCEPT" \
+  "-p tcp --dport 5555 -j DROP"
+do
+  # снимаем прежние копии, чтобы порядок ACCEPT → DROP всегда был верным
+  while iptables -D INPUT $rule 2>/dev/null; do :; done
+done
+
 iptables -A INPUT -s 127.0.0.1/32 -p tcp --dport 5555 -j ACCEPT
 iptables -A INPUT -s 172.16.0.0/12 -p tcp --dport 5555 -j ACCEPT
 iptables -A INPUT -p tcp --dport 5555 -j DROP
-netfilter-persistent save
+EOF
+chmod 755 /usr/local/sbin/tsb-firewall.sh
+
+cat > /etc/systemd/system/tsb-firewall.service <<'EOF'
+[Unit]
+Description=TON Site Builder: закрыть управляющий порт storage-daemon снаружи
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/tsb-firewall.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable --now tsb-firewall.service
+iptables -S INPUT | grep 5555     # должно быть три правила: два ACCEPT и DROP
 ```
 
-Последняя команда обязательна: без неё правила исчезнут после перезагрузки и
-порт снова окажется открыт.
+Подсеть `172.16.0.0/12` оставлена открытой намеренно: через неё к демону
+обращается контейнер backend. Закроете её — публикация сайтов перестанет
+работать.
 
-Если пользуетесь ufw:
-
-```bash
-ufw allow 80,443/tcp
-ufw allow 3333,3335/udp
-ufw deny 5555/tcp
-ufw enable
-```
+> **Почему не netfilter-persistent.** Он сохраняет все правила разом, включая
+> цепочки Docker с адресами контейнеров, и после перезагрузки восстанавливает
+> их поверх свежих — сеть контейнеров может перестать работать. Служба выше
+> трогает только правила порта 5555.
+>
+> **Если решите включить ufw**, сначала выполните `ufw allow OpenSSH` — иначе
+> потеряете доступ к серверу — и разрешите подсеть Docker к порту 5555:
+> `ufw allow from 172.16.0.0/12 to any port 5555 proto tcp`.
 
 ## Шаг 12. Настройка через админку
 
@@ -607,7 +648,7 @@ docker compose --profile storage up -d             # поднять всё, вк
 | Уведомления не приходят | Пользователь не нажал `/start` у бота — Telegram запрещает писать первым |
 | Правки интерфейса не видны | Пересоберите фронтенд (`npm run build`) и перезапустите приложение в Telegram: зажать в списке → «Перезапустить» |
 | `ton-site` перезапускается по кругу | В логе «Wrong length of adnl id»: удалите том `ton_site_data` и дайте сгенерировать ключ заново — **только если домены ещё никому не выданы** |
-| Порт 5555 открыт наружу после перезагрузки | Не сохранены правила: `netfilter-persistent save` |
+| Порт 5555 открыт наружу после перезагрузки | Не включена служба файрвола: `systemctl enable --now tsb-firewall.service` — см. шаг 11 |
 
 ---
 
