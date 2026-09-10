@@ -92,7 +92,8 @@ class Settings(BaseSettings):
     # У демона нет HTTP API: управление идёт утилитой storage-daemon-cli
     # по управляющему порту, ключи демон генерирует сам при первом старте.
     TON_STORAGE_CLI: str = "storage-daemon-cli"
-    TON_STORAGE_CONTROL: str = "storage-daemon:5555"
+    # демон в сети хоста: имя сервиса storage-daemon из контейнера не резолвится
+    TON_STORAGE_CONTROL: str = "host.docker.internal:5555"
     TON_STORAGE_CLI_KEY: str = "/var/ton-work/db/cli-keys/client"
     TON_STORAGE_CLI_PUB: str = "/var/ton-work/db/cli-keys/server.pub"
     # Директория, куда рендерятся сайты перед заливкой (общий volume с storage-daemon)
