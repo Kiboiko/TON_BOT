@@ -32,7 +32,12 @@ def upgrade() -> None:
                 server_default=sa.false(),
             )
         )
-    op.execute("UPDATE sites SET custom_code_paid = true WHERE type = 'custom_code'")
+    # Сравнение через CAST, а не с литералом enum: на чистой базе Postgres все
+    # миграции идут одной транзакцией, и значение custom_code, добавленное в 0004,
+    # ещё не закоммичено — сравнение с ним падает с UnsafeNewEnumValueUsage.
+    op.execute(
+        "UPDATE sites SET custom_code_paid = true WHERE CAST(type AS TEXT) = 'custom_code'"
+    )
 
 
 def downgrade() -> None:
