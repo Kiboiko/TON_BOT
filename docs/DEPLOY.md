@@ -112,12 +112,35 @@ timedatectl set-ntp true && timedatectl
 
 ## Шаг 2. Код проекта
 
+Проект передаётся архивом `ton-site-builder-1.0.zip`. Его нужно загрузить на
+сервер и распаковать в `/opt/tsb`.
+
+**Загрузка с Windows.** В Windows 10 и 11 уже есть `scp` — откройте PowerShell в
+папке с архивом:
+
+```powershell
+scp ton-site-builder-1.0.zip root@IP_СЕРВЕРА:/opt/
+```
+
+Если удобнее мышкой — подключитесь к серверу через
+[WinSCP](https://winscp.net) или FileZilla по протоколу SFTP (тот же логин и
+пароль, что для SSH) и перетащите архив в `/opt`.
+
+**Распаковка на сервере:**
+
 ```bash
-git clone <URL_РЕПОЗИТОРИЯ> /opt/tsb
+apt install -y unzip
+cd /opt
+unzip ton-site-builder-1.0.zip
+mv ton-site-builder tsb
 cd /opt/tsb
 ```
 
 Дальше все команды выполняются из `/opt/tsb`.
+
+> Если проект лежит у вас в собственном git-репозитории, вместо архива можно
+> сделать `git clone <адрес вашего репозитория> /opt/tsb` — дальше всё
+> одинаково.
 
 ## Шаг 3. Бот и Mini App в Telegram
 
@@ -500,16 +523,26 @@ docker compose logs --tail=100 ton-site storage-daemon
 
 ### Обновление версии
 
+Загрузите новый архив в `/opt` так же, как в [шаге 2](#шаг-2-код-проекта), и
+распакуйте поверх существующей установки:
+
 ```bash
+cd /opt
+unzip -o ton-site-builder-НОВАЯ_ВЕРСИЯ.zip
+cp -r ton-site-builder/. tsb/ && rm -rf ton-site-builder
 cd /opt/tsb
-git pull
 cd frontend && npm ci && npm run build && cd ..
 docker compose build
 docker compose run --rm migrate
 docker compose --profile storage up -d
 ```
 
-> Код backend вшивается в образ, поэтому после `git pull` обязателен
+Ваши настройки при этом не затираются: в архиве нет файлов `.env`,
+сертификатов и конфига сети TON, поэтому `backend/.env`, `frontend/.env`,
+`.env`, `nginx/certs/` и `storage/global.config.json` остаются как были. Если
+ставили через git — вместо первых трёх команд достаточно `git pull`.
+
+> Код backend вшивается в образ, поэтому после обновления обязателен
 > `docker compose build` — одного перезапуска контейнера недостаточно.
 >
 > Файлы интерфейса имеют хэш в имени и кэшируются навсегда, а `index.html`

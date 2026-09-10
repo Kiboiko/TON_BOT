@@ -44,14 +44,14 @@
 
 1. Откройте [duckdns.org](https://www.duckdns.org), войдите через GitHub, Google
    или Telegram-независимый аккаунт — регистрация не нужна.
-2. В поле `sub domain` впишите имя, например `tonsitebuilder`, нажмите **add domain**.
+2. В поле `sub domain` впишите имя, например `mysites`, нажмите **add domain**.
 3. В строке появившегося домена впишите **IP вашего сервера** и нажмите **update ip**.
-4. Ваш адрес: `tonsitebuilder.duckdns.org`.
+4. Ваш адрес: `mysites.duckdns.org` — дальше в командах он обозначен как `ВАШ_ДОМЕН`.
 
 Проверьте, что имя резолвится (с любого компьютера):
 
 ```bash
-ping tonsitebuilder.duckdns.org
+ping ВАШ_ДОМЕН
 ```
 
 Если нужен «настоящий» домен — дешевле всего `.ru` на [reg.ru](https://reg.ru)
@@ -78,15 +78,22 @@ apt update && apt install -y docker-ce docker-ce-cli containerd.io docker-compos
 ### 3.2. Проект и сертификат
 
 ```bash
-git clone https://github.com/Kiboiko/TON_BOT.git /opt/tsb && cd /opt/tsb
+# архив проекта уже загружен в /opt — как это сделать, см. docs/DEPLOY.md, шаг 2
+apt install -y unzip
+cd /opt && unzip ton-site-builder-1.0.zip && mv ton-site-builder tsb && cd /opt/tsb
 
 # сертификат Let's Encrypt (домен уже должен указывать на этот сервер)
 apt install -y certbot
-certbot certonly --standalone -d tonsitebuilder.duckdns.org --agree-tos -m ваша@почта --non-interactive
+certbot certonly --standalone -d ВАШ_ДОМЕН --agree-tos -m ваша@почта --non-interactive
 mkdir -p nginx/certs
-cp /etc/letsencrypt/live/tonsitebuilder.duckdns.org/fullchain.pem nginx/certs/
-cp /etc/letsencrypt/live/tonsitebuilder.duckdns.org/privkey.pem  nginx/certs/
+cp /etc/letsencrypt/live/ВАШ_ДОМЕН/fullchain.pem nginx/certs/
+cp /etc/letsencrypt/live/ВАШ_ДОМЕН/privkey.pem  nginx/certs/
 ```
+
+> Выпуск в режиме `--standalone` здесь работает, потому что nginx ещё не
+> запущен. Продлить сертификат так же не получится — порт 80 будет занят.
+> Автопродление настройте по шагу 6 из [DEPLOY.md](DEPLOY.md): переключение на
+> webroot и хук, копирующий новый сертификат для nginx.
 
 ### 3.3. Конфигурация
 
@@ -100,17 +107,17 @@ nano backend/.env
 ```ini
 ENV=prod
 DEBUG=false
-CORS_ORIGINS=https://tonsitebuilder.duckdns.org
+CORS_ORIGINS=https://ВАШ_ДОМЕН
 DATABASE_URL=postgresql+asyncpg://ton:СИЛЬНЫЙ_ПАРОЛЬ@postgres:5432/ton_builder
 TELEGRAM_BOT_TOKEN=токен_от_BotFather
-MINI_APP_URL=https://tonsitebuilder.duckdns.org
+MINI_APP_URL=https://ВАШ_ДОМЕН
 ADMIN_TELEGRAM_IDS=ваш_telegram_id
 TON_NETWORK=testnet
 TON_API_BASE=https://testnet.toncenter.com/api/v2
 TON_API_KEY=ключ_от_@tonapibot
 TREASURY_ADDRESS=адрес_вашего_кошелька
 TON_VERIFY_MODE=onchain
-TONCONNECT_DOMAIN=tonsitebuilder.duckdns.org
+TONCONNECT_DOMAIN=ВАШ_ДОМЕН
 SUBDOM_MODE=http
 TON_STORAGE_MODE=daemon
 ```
@@ -126,9 +133,9 @@ printf 'POSTGRES_USER=ton\nPOSTGRES_PASSWORD=СИЛЬНЫЙ_ПАРОЛЬ\nPOSTGR
 ```bash
 cat > frontend/public/tonconnect-manifest.json <<'JSON'
 {
-  "url": "https://tonsitebuilder.duckdns.org",
+  "url": "https://ВАШ_ДОМЕН",
   "name": "TON Site Builder",
-  "iconUrl": "https://tonsitebuilder.duckdns.org/icon-192.png"
+  "iconUrl": "https://ВАШ_ДОМЕН/icon-192.png"
 }
 JSON
 echo 'VITE_TWA_RETURN_URL=https://t.me/ИМЯ_ВАШЕГО_БОТА' > frontend/.env
@@ -156,14 +163,14 @@ docker compose --profile storage up -d --build
 
 ```bash
 docker compose ps                                   # все сервисы Up
-curl https://tonsitebuilder.duckdns.org/health      # {"status":"ok"}
-python3 scripts/smoke_test.py https://tonsitebuilder.duckdns.org/api ТОКЕН_БОТА
+curl https://ВАШ_ДОМЕН/health      # {"status":"ok"}
+python3 scripts/smoke_test.py https://ВАШ_ДОМЕН/api ТОКЕН_БОТА
 ```
 
 ### 3.6. Привязка к боту
 
 В @BotFather: `/mybots` → ваш бот → **Bot Settings → Menu Button → Configure menu
-button** → адрес `https://tonsitebuilder.duckdns.org`.
+button** → адрес `https://ВАШ_ДОМЕН`.
 
 Готово: открывайте бота, жмите кнопку меню.
 
