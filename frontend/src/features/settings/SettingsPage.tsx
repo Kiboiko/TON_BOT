@@ -59,6 +59,15 @@ export function SettingsPage() {
     const address = wallet.account.address;
     if (attempted.current.has(address)) return;
 
+    // Кошелёк уже подтверждён на сервере. TonConnect хранит доказательство всю
+    // сессию, и при каждом возврате в профиль оно уходило бы повторно — но
+    // payload одноразовый, сервер отвечал 401, и под подтверждённым кошельком
+    // появлялась ложная ошибка «подтвердить владение не удалось».
+    if (user?.wallet_address && user.wallet_address.toLowerCase() === address.toLowerCase()) {
+      attempted.current.add(address);
+      return;
+    }
+
     const proof = wallet.connectItems?.tonProof;
     if (!proof || !("proof" in proof)) {
       setWallet(address);
@@ -89,7 +98,7 @@ export function SettingsPage() {
         toastError(error);
       })
       .finally(() => setProofPending(false));
-  }, [wallet, proofPending, retry, setWallet, t, toast, toastError]);
+  }, [wallet, proofPending, retry, user?.wallet_address, setWallet, t, toast, toastError]);
 
   const address = user?.wallet_address ?? wallet?.account.address ?? null;
 
