@@ -502,3 +502,57 @@ async def test_publish_result_is_committed_before_notifying(client, queue, stora
         site = await session.get(Site, uuid.UUID(site_id))
         assert site.status == SiteStatus.published
         assert site.storage_bag_id
+
+
+async def test_subscription_purchase_credits_payment_that_already_arrived(client, ton):
+    """Подписка: дошедшую, но неподтверждённую оплату засчитываем вместо новой."""
+    h = headers_for(2050)
+    tariff_id = await make_tariff(name="Recovered", price="2")
+
+    first = await client.post(
+        "/api/subscriptions/purchase", headers=h, json={"tariff_id": str(tariff_id)}
+    )
+    comment = await payment_comment(first.json()["payment_id"])
+    ton.add(paid_tx(comment, "2", tx_hash="sub-arrived"))
+
+    again = await client.post(
+        "/api/subscriptions/purchase", headers=h, json={"tariff_id": str(tariff_id)}
+    )
+    assert again.status_code == 200
+    body = again.json()
+    assert body["already_paid"] is True
+    assert body["recovered_tariffs"] == ["Recovered"]
+    assert body["transaction"] is None
+
+    subs = (await client.get("/api/subscriptions", headers=h)).json()
+    assert len(subs) == 1
+
+
+async def test_confirming_same_payment_twice_does_not_extend_twice(client, ton):
+    """Повтор подтверждения той же оплаты не продлевает подписку второй раз."""
+    from datetime import datetime, timezone
+
+    h = headers_for(2051)
+    tariff_id = await make_tariff(name="Once", price="2")
+    bought = await client.post(
+        "/api/subscriptions/purchase", headers=h, json={"tariff_id": str(tariff_id)}
+    )
+    payment_id = bought.json()["payment_id"]
+    ton.add(paid_tx(await payment_comment(payment_id), "2", tx_hash="sub-once"))
+
+    body = {"payment_id": payment_id, "tx_hash": "sub-once-boc-0001"}
+    first = await client.post("/api/subscriptions/confirm", headers=h, json=body)
+    second = await client.post("/api/subscriptions/confirm", headers=h, json=body)
+    assert first.status_code == 200 and second.status_code == 200
+
+    # Один и тот же момент приходит в разной записи: только что созданная
+    # подписка сериализуется с поясом, прочитанная из SQLite — без него.
+    def instant(value: str) -> datetime:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+    assert instant(first.json()["subscription"]["expires_at"]) == instant(
+        second.json()["subscription"]["expires_at"]
+    ), "одна оплата — одно продление"
+    subs = (await client.get("/api/subscriptions", headers=h)).json()
+    assert len(subs) == 1

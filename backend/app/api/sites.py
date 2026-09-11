@@ -267,6 +267,15 @@ async def purchase_custom_code(
     if site.custom_code_paid:
         raise Conflict("Custom code is already paid for this site", code="CUSTOM_CODE_PAID")
 
+    # Прошлая оплата могла дойти, но не подтвердиться. Засчитываем её обычным
+    # ответом, а не ошибкой: при исключении сессия откатится вместе с засчётом.
+    if await payments_service.recover_paid_pending(
+        session, user=user, purpose=PaymentPurpose.custom_code, related_id=site.id
+    ):
+        site.custom_code_paid = True
+        await session.flush()
+        return PurchaseResponse(already_paid=True)
+
     tariff = await _custom_code_tariff(session)
     payment = await payments_service.create_payment(
         session,
@@ -287,7 +296,7 @@ async def confirm_custom_code(
 ) -> SuccessResponse:
     """Подтверждение оплаты — только после проверки транзакции в блокчейне."""
     site = await _get_site(session, site_id, user)
-    payment = await payments_service.get_payment_for_user(session, body.payment_id, user)
+    payment = await payments_service.get_payment_for_update(session, body.payment_id, user)
     if payment.purpose != PaymentPurpose.custom_code or payment.related_id != site.id:
         raise BadRequest("Payment does not belong to this site", code="PAYMENT_MISMATCH")
 

@@ -725,3 +725,54 @@ async def test_about_page_is_editable_by_admin(client):
     bad = await client.patch("/api/admin/about", headers=admin, json={"link_url": "javascript:1"})
     assert bad.status_code == 400
     assert bad.json()["error"]["code"] == "INVALID_URL"
+
+
+async def test_custom_code_purchase_credits_payment_that_already_arrived(client, ton):
+    """Оплата дошла, но подтверждение сорвалось — повторная покупка не берёт денег.
+
+    В бою так и было: подтверждение падало, клиент нажимал «Оплатить» снова и
+    платил за каждый сайт дважды.
+    """
+    from app.models import Payment, PaymentStatus
+    from tests.test_full_cycle import paid_tx, payment_comment
+
+    await _set_custom_code_price("0.2")
+    h = headers_for(4020)
+    await client.post("/api/user/auth", headers=h, json={})
+    created = await client.post("/api/sites", headers=h, json={"type": "custom_code", "title": "CC"})
+    site_id = created.json()["site"]["id"]
+
+    first = await client.post(f"/api/sites/{site_id}/custom-code/purchase", headers=h)
+    payment_id = first.json()["payment_id"]
+    # перевод дошёл, а подтверждения так и не было
+    ton.add(paid_tx(await payment_comment(payment_id), "0.2", tx_hash="cc-arrived"))
+
+    again = await client.post(f"/api/sites/{site_id}/custom-code/purchase", headers=h)
+    assert again.status_code == 200
+    body = again.json()
+    assert body["already_paid"] is True
+    assert body["transaction"] is None
+
+    site = (await client.get(f"/api/sites/{site_id}", headers=h)).json()["site"]
+    assert site["custom_code_paid"] is True
+    async with SessionLocal() as session:
+        rows = (
+            await session.scalars(select(Payment).where(Payment.related_id == uuid.UUID(site_id)))
+        ).all()
+    assert len(rows) == 1, "второй платёж создаваться не должен"
+    assert rows[0].status == PaymentStatus.confirmed
+
+
+async def test_unpaid_pending_does_not_block_new_purchase(client, ton):
+    """Непришедший платёж (закрыли кошелёк, не подписав) не мешает оплатить заново."""
+    await _set_custom_code_price("0.2")
+    h = headers_for(4021)
+    await client.post("/api/user/auth", headers=h, json={})
+    created = await client.post("/api/sites", headers=h, json={"type": "custom_code", "title": "CC"})
+    site_id = created.json()["site"]["id"]
+
+    await client.post(f"/api/sites/{site_id}/custom-code/purchase", headers=h)
+    again = await client.post(f"/api/sites/{site_id}/custom-code/purchase", headers=h)
+    assert again.status_code == 200
+    assert again.json()["already_paid"] is False
+    assert again.json()["transaction"] is not None

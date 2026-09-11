@@ -14,6 +14,7 @@ import logging
 import secrets
 import time
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -135,3 +136,75 @@ async def confirm_payment(
     await session.flush()
     log.info("payment %s confirmed (%s TON)", payment.id, payment.amount)
     return payment
+
+
+# Сколько назад искать дошедшие, но неподтверждённые оплаты. Дольше суток к
+# покупке обычно не возвращаются, а каждый платёж — отдельный запрос к TON API.
+RECOVERY_WINDOW = timedelta(hours=24)
+RECOVERY_LIMIT = 5
+
+
+async def get_payment_for_update(
+    session: AsyncSession, payment_id: uuid.UUID, user: User
+) -> Payment:
+    """Платёж пользователя с блокировкой строки до конца транзакции.
+
+    Подтверждение сначала смотрит на статус, а потом активирует покупку. Без
+    блокировки два одновременных запроса — повтор с фронта и сверка перед новой
+    покупкой — оба видели pending и засчитывали одну оплату дважды.
+    """
+    payment = await session.scalar(
+        select(Payment)
+        .where(Payment.id == payment_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if payment is None or payment.user_id != user.id:
+        raise NotFound("Payment not found", code="PAYMENT_NOT_FOUND")
+    return payment
+
+
+async def recover_paid_pending(
+    session: AsyncSession,
+    *,
+    user: User,
+    purpose: PaymentPurpose,
+    related_id: uuid.UUID | None = None,
+) -> list[Payment]:
+    """Засчитывает неподтверждённые платежи, которые на самом деле дошли.
+
+    Подтверждение может сорваться по причинам, не связанным с оплатой: сбой
+    сети или TON API, закрытое приложение. Деньги уже ушли, а интерфейс снова
+    предлагает заплатить. Поэтому перед новой покупкой ищем такие платежи в
+    блокчейне по их комментариям: найденные засчитываются, и платить второй раз
+    не нужно. Непришедшие остаются pending и новой покупке не мешают.
+    """
+    conditions = [
+        Payment.user_id == user.id,
+        Payment.purpose == purpose,
+        Payment.status == PaymentStatus.pending,
+        Payment.created_at >= utcnow() - RECOVERY_WINDOW,
+    ]
+    if related_id is not None:
+        conditions.append(Payment.related_id == related_id)
+    ids = (
+        await session.scalars(
+            select(Payment.id)
+            .where(*conditions)
+            .order_by(Payment.created_at.desc())
+            .limit(RECOVERY_LIMIT)
+        )
+    ).all()
+
+    recovered: list[Payment] = []
+    for payment_id in ids:
+        payment = await get_payment_for_update(session, payment_id, user)
+        if payment.status != PaymentStatus.pending:
+            continue  # его уже засчитал параллельный запрос
+        try:
+            await confirm_payment(session, payment, f"recover-{payment.id}")
+        except (PaymentNotConfirmed, Conflict):
+            continue
+        log.info("payment %s recovered before a new purchase", payment.id)
+        recovered.append(payment)
+    return recovered

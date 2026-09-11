@@ -170,7 +170,15 @@ export function CustomCodePage() {
   async function buy(): Promise<void> {
     setBuying(true);
     try {
-      const { transaction, payment_id } = await sitesApi.purchaseCustomCode(siteId);
+      const { transaction, payment_id, already_paid } = await sitesApi.purchaseCustomCode(siteId);
+      // прошлая оплата дошла, хотя подтверждение тогда сорвалось: сервер нашёл
+      // её в блокчейне и засчитал — второй раз деньги не списываем
+      if (already_paid || !transaction || !payment_id) {
+        setPaid(true);
+        toast(t("customCode.recovered"), "success");
+        if (code.html || code.css || code.js) await save();
+        return;
+      }
       const done = await payment.pay(transaction, (txHash) =>
         sitesApi.confirmCustomCode(siteId, { payment_id, tx_hash: txHash }),
       );

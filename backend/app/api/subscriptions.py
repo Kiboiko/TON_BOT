@@ -1,13 +1,16 @@
 """Тарифы и подписки: витрина, покупка, подтверждение оплаты, список подписок."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, SessionDep
-from app.core.errors import BadRequest, NotFound
+from app.core.errors import BadRequest, Conflict, NotFound
 from app.models import (
     PaymentPurpose,
+    PaymentStatus,
     Site,
     Subscription,
     Tariff,
@@ -24,6 +27,8 @@ from app.schemas import (
 )
 from app.services import payments as payments_service
 from app.services import subscriptions as subs_service
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["subscriptions"])
 
@@ -53,6 +58,23 @@ async def purchase(
         if site is None or site.user_id != user.id:
             raise NotFound("Site not found", code="SITE_NOT_FOUND")
 
+    # Прошлая оплата могла дойти, но не подтвердиться (сбой сети, закрытое
+    # приложение). Засчитываем её вместо того, чтобы брать деньги второй раз, —
+    # обычным ответом: при исключении сессия откатится вместе с засчётом.
+    recovered = await payments_service.recover_paid_pending(
+        session, user=user, purpose=PaymentPurpose.subscription
+    )
+    names: list[str] = []
+    for paid in recovered:
+        paid_tariff = await session.get(Tariff, paid.related_id) if paid.related_id else None
+        if paid_tariff is None:
+            log.warning("recovered payment %s has no tariff to activate", paid.id)
+            continue
+        await subs_service.activate_subscription(session, user=user, tariff=paid_tariff)
+        names.append(paid_tariff.name)
+    if names:
+        return PurchaseResponse(already_paid=True, recovered_tariffs=names)
+
     payment = await payments_service.create_payment(
         session,
         user=user,
@@ -71,7 +93,7 @@ async def confirm(
     session: SessionDep, user: CurrentUser, body: ConfirmPaymentRequest
 ) -> SubscriptionResponse:
     """Подтверждение оплаты: проверка транзакции on-chain, затем активация подписки."""
-    payment = await payments_service.get_payment_for_user(session, body.payment_id, user)
+    payment = await payments_service.get_payment_for_update(session, body.payment_id, user)
     if payment.purpose != PaymentPurpose.subscription:
         raise BadRequest("Payment is not a subscription payment", code="PAYMENT_MISMATCH")
 
@@ -79,10 +101,23 @@ async def confirm(
     if tariff is None:
         raise NotFound("Tariff not found", code="TARIFF_NOT_FOUND")
 
+    # Активирует только тот запрос, который сам подтвердил платёж. Его могли уже
+    # засчитать повтор с фронта или сверка перед новой покупкой — продлевать
+    # подписку второй раз за ту же оплату нельзя.
+    newly_confirmed = payment.status == PaymentStatus.pending
     await payments_service.confirm_payment(session, payment, body.tx_hash)
-    subscription = await subs_service.activate_subscription(
-        session, user=user, tariff=tariff
-    )
+    if newly_confirmed:
+        subscription = await subs_service.activate_subscription(
+            session, user=user, tariff=tariff
+        )
+    else:
+        subscription = await session.scalar(
+            select(Subscription)
+            .where(Subscription.user_id == user.id, Subscription.tariff_id == tariff.id)
+            .order_by(Subscription.created_at.desc())
+        )
+        if subscription is None:
+            raise Conflict("Payment has already been applied", code="PAYMENT_ALREADY_APPLIED")
     return SubscriptionResponse(subscription=SubscriptionOut.model_validate(subscription))
 
 

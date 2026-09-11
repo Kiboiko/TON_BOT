@@ -121,6 +121,7 @@ export const en: Translations = {
     priceMissing: "Price is not configured — contact the administrator",
     buy: "Pay {{price}} Gram",
     purchased: "Paid — custom code is unlocked for this site",
+    recovered: "Your earlier payment was found on-chain and credited — no need to pay again",
     payFirst: "Pay for custom code first",
     uploadImage: "Upload photo",
     uploadHint: "The link is inserted straight into the current tab",
@@ -207,6 +208,7 @@ export const en: Translations = {
     paying: "Waiting for the wallet signature…",
     confirming: "Verifying the payment on-chain…",
     success: "Subscription activated",
+    recovered: "Your earlier payment was found on-chain and credited: {{names}}. No need to pay again",
     empty: "The admin has not configured plans yet",
   },
   subscriptions: {

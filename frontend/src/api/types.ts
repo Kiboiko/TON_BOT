@@ -131,6 +131,18 @@ export interface TonConnectMessage {
   stateInit?: string | null;
 }
 
+/**
+ * Ответ на покупку. Без транзакции — прошлая оплата нашлась в блокчейне и
+ * засчитана сервером, платить второй раз не нужно.
+ */
+export interface PurchaseResult {
+  transaction: TonConnectTransaction | null;
+  payment_id: string | null;
+  already_paid: boolean;
+  /** подписки, которые продлила найденная оплата */
+  recovered_tariffs?: string[];
+}
+
 export interface TonConnectTransaction {
   validUntil: number;
   messages: TonConnectMessage[];

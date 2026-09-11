@@ -51,7 +51,15 @@ export function TariffsPage() {
   async function buy(tariff: Tariff): Promise<void> {
     setBusyId(tariff.id);
     try {
-      const { transaction, payment_id } = await billingApi.purchase({ tariff_id: tariff.id });
+      const { transaction, payment_id, already_paid, recovered_tariffs } = await billingApi.purchase({
+        tariff_id: tariff.id,
+      });
+      // прошлая оплата дошла, хотя подтверждение тогда сорвалось: сервер её
+      // засчитал — списывать деньги второй раз не нужно
+      if (already_paid || !transaction || !payment_id) {
+        toast(t("tariffs.recovered", { names: (recovered_tariffs ?? []).join(", ") }), "success");
+        return;
+      }
       const result = await payment.pay(transaction, (txHash) =>
         billingApi.confirm({ payment_id, tx_hash: txHash }),
       );

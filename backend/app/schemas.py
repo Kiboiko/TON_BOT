@@ -338,8 +338,12 @@ class PurchaseRequest(BaseModel):
 
 
 class PurchaseResponse(BaseModel):
-    transaction: TonConnectTransaction
-    payment_id: uuid.UUID
+    # Пустые, когда платить не нужно: прошлая оплата нашлась в блокчейне и
+    # засчитана (already_paid). recovered_tariffs — какие подписки она продлила.
+    transaction: TonConnectTransaction | None = None
+    payment_id: uuid.UUID | None = None
+    already_paid: bool = False
+    recovered_tariffs: list[str] = Field(default_factory=list)
 
 
 class ConfirmPaymentRequest(BaseModel):

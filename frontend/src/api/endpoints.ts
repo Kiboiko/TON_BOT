@@ -11,6 +11,7 @@ import type {
   DomainCheck,
   Language,
   PublishStatus,
+  PurchaseResult,
   Site,
   SiteContent,
   SiteListItem,
@@ -71,9 +72,7 @@ export const sitesApi = {
   customCodePrice: (id: string) =>
     api.get<{ price_ton: string; paid: boolean }>(`/sites/${id}/custom-code/price`),
   purchaseCustomCode: (id: string) =>
-    api.post<{ transaction: TonConnectTransaction; payment_id: string }>(
-      `/sites/${id}/custom-code/purchase`,
-    ),
+    api.post<PurchaseResult>(`/sites/${id}/custom-code/purchase`),
   confirmCustomCode: (id: string, body: { payment_id: string; tx_hash: string }) =>
     api.post<{ success: boolean }>(`/sites/${id}/custom-code/confirm`, body),
   setCustomCode: (id: string, body: CustomCode) =>
@@ -108,10 +107,7 @@ export const domainsApi = {
 export const billingApi = {
   tariffs: () => api.get<Tariff[]>("/tariffs"),
   purchase: (body: { tariff_id: string; site_id?: string }) =>
-    api.post<{ transaction: TonConnectTransaction; payment_id: string }>(
-      "/subscriptions/purchase",
-      body,
-    ),
+    api.post<PurchaseResult>("/subscriptions/purchase", body),
   confirm: (body: { payment_id: string; tx_hash: string }) =>
     api.post<{ subscription: Subscription }>("/subscriptions/confirm", body),
   subscriptions: () => api.get<Subscription[]>("/subscriptions"),
