@@ -260,7 +260,7 @@ export function CustomCodePage() {
             if (await save()) navigate(`/sites/${siteId}/publish`);
           }}
         >
-          {t("editor.publish")}
+          {site.status === "published" ? t("editor.update") : t("editor.publish")}
         </Button>
       </div>
 

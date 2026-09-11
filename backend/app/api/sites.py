@@ -194,6 +194,7 @@ async def publish_status(
         published_at=site.published_at,
         error=site.publish_error,
         public_url=public_site_url(site),
+        has_unpublished_changes=site.has_unpublished_changes,
     )
 
 

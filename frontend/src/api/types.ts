@@ -97,6 +97,8 @@ export interface Site {
   custom_code: CustomCode | null;
   /** возможность своего кода оплачена для этого сайта (разовый платёж) */
   custom_code_paid: boolean;
+  /** сайт опубликован, но с тех пор его правили — пора обновить публикацию */
+  has_unpublished_changes?: boolean;
   domain: string | null;
   dns_item_address: string | null;
   collection_address: string | null;
@@ -113,6 +115,7 @@ export interface SiteListItem {
   title: string;
   domain: string | null;
   status: SiteStatus;
+  has_unpublished_changes?: boolean;
   published_at: string | null;
   created_at: string;
   updated_at: string;
@@ -216,6 +219,7 @@ export interface PublishStatus {
   error: string | null;
   /** http-ссылка на опубликованный сайт — работает и до привязки домена .ton */
   public_url: string | null;
+  has_unpublished_changes?: boolean;
 }
 
 export interface AdminUserListItem {

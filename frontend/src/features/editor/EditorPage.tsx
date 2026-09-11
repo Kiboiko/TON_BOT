@@ -151,6 +151,27 @@ export function EditorPage() {
         extra={saveBadge}
       />
 
+      {/* правки опубликованного сайта не видны посетителям, пока его не обновят */}
+      {editor.site?.status === "published" && editor.site.has_unpublished_changes ? (
+        <Notice kind="warning">
+          <div>
+            {t("editor.unpublishedChanges")}
+            <div style={{ marginTop: 8 }}>
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={async () => {
+                  await editor.saveNow();
+                  navigate(`/sites/${siteId}/publish`);
+                }}
+              >
+                🔄 {t("editor.updateSite")}
+              </Button>
+            </div>
+          </div>
+        </Notice>
+      ) : null}
+
       <div className="row">
         <Button size="sm" disabled={!editor.canUndo()} onClick={editor.undo} title={t("editor.undo")}>
           ↶
@@ -170,7 +191,7 @@ export function EditorPage() {
             navigate(`/sites/${siteId}/publish`);
           }}
         >
-          {t("editor.publish")}
+          {editor.site?.status === "published" ? t("editor.update") : t("editor.publish")}
         </Button>
       </div>
 

@@ -43,6 +43,8 @@ export function PublishPage() {
   const [publishError, setPublishError] = useState<string | null>(null);
   const [bagId, setBagId] = useState<string | null>(null);
   const [publicUrl, setPublicUrl] = useState<string | null>(null);
+  // правки после публикации, которых посетители ещё не видят
+  const [hasChanges, setHasChanges] = useState(false);
 
   // ТЗ допускает и свой домен, и субдомен: «мини-сайты на доменах/субдоменах TON»
   const [mode, setMode] = useState<"subdomain" | "own">("subdomain");
@@ -57,6 +59,8 @@ export function PublishPage() {
   const [slow, setSlow] = useState(false);
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // публикация уже опубликованного сайта — это обновление, и сообщение другое
+  const updating = useRef(false);
 
   useEffect(() => showBackButton(() => navigate(`/sites/${siteId}`)), [navigate, siteId]);
 
@@ -67,6 +71,7 @@ export function PublishPage() {
         setSite(loaded);
         setStatus(loaded.status);
         setBagId(loaded.storage_bag_id);
+        setHasChanges(Boolean(loaded.has_unpublished_changes));
         if (loaded.status === "published") {
           void sitesApi.publishStatus(siteId).then((s) => setPublicUrl(s.public_url));
         }
@@ -102,13 +107,17 @@ export function PublishPage() {
         setBagId(result.storage_bag_id);
         setPublicUrl(result.public_url);
         setPublishError(result.error);
+        setHasChanges(Boolean(result.has_unpublished_changes));
         if (result.status === "publishing") {
           setSlow(Date.now() - startedAt > SLOW_AFTER_MS);
           pollTimer.current = setTimeout(() => void tick(), POLL_INTERVAL);
         } else if (result.status === "published") {
           setSlow(false);
           haptic.success();
-          toast(t("publish.published"), "success");
+          toast(updating.current ? t("publish.updated") : t("publish.published"), "success");
+          updating.current = false;
+          // дата публикации на экране должна показывать новую версию
+          setSite((prev) => (prev ? { ...prev, published_at: result.published_at } : prev));
         } else if (result.status === "publish_error") {
           haptic.error();
         }
@@ -199,6 +208,7 @@ export function PublishPage() {
   }
 
   async function publish(): Promise<void> {
+    updating.current = status === "published";
     setPublishing(true);
     setPublishError(null);
     setSlow(false);
@@ -421,6 +431,11 @@ export function PublishPage() {
                 })}
               </div>
             ) : null}
+            {hasChanges ? (
+              <div style={{ marginTop: 12 }}>
+                <Notice kind="warning">{t("publish.hasChanges")}</Notice>
+              </div>
+            ) : null}
             {publicUrl ? (
               <div style={{ marginTop: 12 }}>
                 <Button variant="primary" block onClick={() => openLink(publicUrl)}>
@@ -476,11 +491,25 @@ export function PublishPage() {
 
         {status !== "publishing" ? (
           <div style={{ marginTop: 12 }}>
-            <Button variant="primary" block loading={publishing} onClick={() => void publish()}>
-              {status === "published" || status === "publish_error"
-                ? t("publish.retry")
-                : t("editor.publish")}
+            {/* На опубликованном сайте это обновление, а не «повтор»: домен уже
+                смотрит на наш сервер, и новая версия сразу видна по нему. */}
+            <Button
+              variant={status === "published" && !hasChanges ? "default" : "primary"}
+              block
+              loading={publishing}
+              onClick={() => void publish()}
+            >
+              {status === "published"
+                ? `🔄 ${t("publish.update")}`
+                : status === "publish_error"
+                  ? t("publish.retry")
+                  : t("editor.publish")}
             </Button>
+            {status === "published" ? (
+              <div className="card-sub" style={{ marginTop: 6 }}>
+                {t("publish.updateHint")}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>

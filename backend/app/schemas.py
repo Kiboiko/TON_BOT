@@ -119,6 +119,8 @@ class SiteOut(ORMModel):
     content_json: dict[str, Any]
     custom_code: dict[str, Any] | None = None
     custom_code_paid: bool = False
+    # сайт опубликован, но с тех пор его правили — пора обновить публикацию
+    has_unpublished_changes: bool = False
     domain: str | None = None
     dns_item_address: str | None = None
     collection_address: str | None = None
@@ -146,6 +148,7 @@ class SiteListItem(ORMModel):
     title: str
     domain: str | None = None
     status: SiteStatus
+    has_unpublished_changes: bool = False
     published_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
@@ -310,6 +313,7 @@ class PublishStatusResponse(BaseModel):
     # http-ссылка на опубликованный сайт: домен .ton открывается TON-браузером,
     # а эта ссылка работает в любом браузере и до привязки домена
     public_url: str | None = None
+    has_unpublished_changes: bool = False
 
 
 class DnsBindResponse(BaseModel):

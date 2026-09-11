@@ -556,3 +556,57 @@ async def test_confirming_same_payment_twice_does_not_extend_twice(client, ton):
     ), "одна оплата — одно продление"
     subs = (await client.get("/api/subscriptions", headers=h)).json()
     assert len(subs) == 1
+
+
+async def test_published_site_can_be_updated(client, queue, storage, notifier):
+    """Опубликованный сайт обновляется повторной публикацией по той же ссылке.
+
+    После правки приложение видит неопубликованные изменения, наружу по-прежнему
+    отдаётся прошлая версия, а после обновления — новая. Домен и подпись в
+    кошельке для этого не нужны.
+    """
+    h = headers_for(2052)
+    created = await client.post(
+        "/api/sites", headers=h, json={"type": "visitka", "title": "Обновляемый"}
+    )
+    site_id = created.json()["site"]["id"]
+
+    def content(title: str) -> dict:
+        return {"content_json": {
+            "version": 1,
+            "meta": {"title": "Обновляемый"},
+            "theme": {"preset": "light", "accent": "#0098ea"},
+            "blocks": [{"id": "1", "type": "hero", "props": {"title": title}}],
+        }}
+
+    async def publish() -> None:
+        started = await client.post(f"/api/sites/{site_id}/publish", headers=h)
+        assert started.status_code == 200
+        job = await queue.dequeue(timeout=1)
+        await run_publish_job(job.payload["site_id"])
+
+    await client.patch(f"/api/sites/{site_id}", headers=h, json=content("Первая версия"))
+    await publish()
+    site = (await client.get(f"/api/sites/{site_id}", headers=h)).json()["site"]
+    assert site["status"] == "published"
+    assert site["has_unpublished_changes"] is False
+
+    await client.patch(f"/api/sites/{site_id}", headers=h, json=content("Вторая версия"))
+    site = (await client.get(f"/api/sites/{site_id}", headers=h)).json()["site"]
+    assert site["has_unpublished_changes"] is True
+    listed = (await client.get("/api/sites", headers=h)).json()
+    assert next(s for s in listed if s["id"] == site_id)["has_unpublished_changes"] is True
+    # правка не уходит наружу, пока сайт не обновили
+    page = await client.get(f"/s/{site_id}")
+    assert "Первая версия" in page.text and "Вторая версия" not in page.text
+
+    await publish()
+    status = (await client.get(f"/api/sites/{site_id}/publish-status", headers=h)).json()
+    assert status["status"] == "published"
+    assert status["has_unpublished_changes"] is False
+    page = await client.get(f"/s/{site_id}")
+    assert "Вторая версия" in page.text
+    # первое сообщение — о публикации, второе — об обновлении
+    texts = [text for _, text in notifier.sent]
+    assert any("опубликован" in text for text in texts)
+    assert any("обновлён" in text for text in texts)

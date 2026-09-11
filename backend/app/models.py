@@ -5,6 +5,9 @@ API теряется только возможность создать новы
 """
 from __future__ import annotations
 
+import hashlib
+import json
+
 import enum
 import uuid
 from datetime import datetime, timezone
@@ -164,6 +167,9 @@ class Site(Base):
     publish_error: Mapped[str | None] = mapped_column(Text)
     publish_job_id: Mapped[str | None] = mapped_column(String(64))
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Отпечаток содержимого, которое сейчас опубликовано. По нему видно, что
+    # сайт правили после публикации и опубликованную версию пора обновить.
+    published_hash: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -174,6 +180,39 @@ class Site(Base):
     user: Mapped[User] = relationship(back_populates="sites")
 
     __table_args__ = (Index("ix_sites_user_status", "user_id", "status"),)
+
+    @property
+    def content_hash(self) -> str:
+        """Отпечаток всего, что попадает на опубликованную страницу.
+
+        Хэшируем исходные данные, а не готовый HTML: иначе любое изменение
+        шаблонов в новой версии приложения помечало бы все сайты изменёнными.
+        """
+        payload = {
+            "title": self.title,
+            "type": self.type.value if self.type else None,
+            # домен выводится в подвале страницы
+            "domain": self.domain,
+            "content": self.content_json,
+            "custom_code": self.custom_code if self.custom_code_paid else None,
+        }
+        raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+        return hashlib.sha256(raw.encode()).hexdigest()
+
+    @property
+    def has_unpublished_changes(self) -> bool:
+        """Сайт опубликован, но с тех пор его содержимое менялось."""
+        if self.status != SiteStatus.published:
+            return False
+        if self.published_hash:
+            return self.published_hash != self.content_hash
+        # Опубликованные до появления отпечатка: судим по времени последней
+        # правки. Сама публикация тоже трогает updated_at, отсюда допуск.
+        if self.published_at is None or self.updated_at is None:
+            return False
+        published = self.published_at.replace(tzinfo=None)
+        updated = self.updated_at.replace(tzinfo=None)
+        return (updated - published).total_seconds() > 5
 
 
 class Tariff(Base):

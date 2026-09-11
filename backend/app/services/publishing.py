@@ -74,6 +74,9 @@ async def publish_site(session: AsyncSession, site: Site) -> Site:
     """Синхронная часть публикации: рендер и заливка в TON Storage."""
     user = await session.get(User, site.user_id)
     html = build_site_html(site)
+    # отпечаток берём с того же состояния, из которого собрана страница: правка
+    # во время публикации не должна считаться уже опубликованной
+    fingerprint = site.content_hash
     build_dir = Path(settings.SITES_BUILD_DIR) / str(site.id)
 
     try:
@@ -91,6 +94,7 @@ async def publish_site(session: AsyncSession, site: Site) -> Site:
     site.storage_bag_id = bag.bag_id
     site.status = SiteStatus.published
     site.published_at = utcnow()
+    site.published_hash = fingerprint
     site.publish_error = None
     await session.flush()
     log.info("site %s published, bag=%s", site.id, bag.bag_id)
@@ -121,6 +125,8 @@ async def _run_publish(site_uuid: uuid.UUID) -> dict[str, Any] | None:
         if site is None:
             log.warning("publish job: site %s not found", site_uuid)
             return None
+        # сайт уже публиковали — значит, это обновление, и бот скажет «обновлён»
+        was_published = site.published_at is not None
         await publish_site(session, site)
         user = await session.get(User, site.user_id)
         # значения снимаем до коммита: после него атрибуты нужно было бы перечитывать
@@ -132,6 +138,7 @@ async def _run_publish(site_uuid: uuid.UUID) -> dict[str, Any] | None:
             "domain": site.domain,
             "dns_item_address": site.dns_item_address,
             "error": site.publish_error,
+            "updated": was_published,
         }
         await session.commit()
     return outcome
@@ -182,9 +189,8 @@ async def _notify_publish_result(outcome: dict[str, Any]) -> None:
 
     if outcome["status"] == SiteStatus.published:
         domain = f" на {outcome['domain']}" if outcome["domain"] else ""
-        await notifications.notify(
-            telegram_id, "site_published", language, title=title, domain=domain
-        )
+        event = "site_updated" if outcome.get("updated") else "site_published"
+        await notifications.notify(telegram_id, event, language, title=title, domain=domain)
         if outcome["dns_item_address"]:
             # Адрес нашего прокси не меняется, поэтому запись домена нужна
             # ровно один раз. Дёргаем владельца только когда точно знаем,

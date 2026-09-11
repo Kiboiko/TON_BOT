@@ -24,6 +24,10 @@ MESSAGES: dict[str, dict[str, str]] = {
         "ru": "✅ Сайт «{title}» опубликован{domain}.",
         "en": "✅ Site “{title}” is published{domain}.",
     },
+    "site_updated": {
+        "ru": "🔄 Сайт «{title}» обновлён{domain}.",
+        "en": "🔄 Site “{title}” is updated{domain}.",
+    },
     "publish_error": {
         "ru": "⚠️ Не удалось опубликовать сайт «{title}».\nПричина: {error}\nПопробуйте ещё раз или напишите в поддержку.",
         "en": "⚠️ Failed to publish site “{title}”.\nReason: {error}\nPlease try again or contact support.",

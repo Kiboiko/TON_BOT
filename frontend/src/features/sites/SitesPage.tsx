@@ -130,6 +130,11 @@ export function SitesPage() {
                   <div className="card-sub">
                     {site.domain ?? template?.title[language] ?? site.type}
                   </div>
+                  {site.has_unpublished_changes ? (
+                    <div className="card-sub" style={{ color: "var(--warning)" }}>
+                      ● {t("sites.hasChanges")}
+                    </div>
+                  ) : null}
                 </div>
                 <Badge kind={STATUS_KIND[site.status]}>{t(`sites.status.${site.status}`)}</Badge>
               </div>
