@@ -580,3 +580,64 @@ async def test_claim_does_not_charge_twice_for_owned_subdomain(client, resolver)
     site = (await client.get(f"/api/sites/{site_id}", headers=h)).json()["site"]
     assert site["domain"] == "promo.tonsite.ton"
     assert site["dns_item_address"] == "0:" + "ee" * 32
+
+
+async def test_broken_utf8_in_toncenter_response_does_not_break_payments():
+    """Зашифрованный комментарий в истории кошелька не должен ронять проверку платежей.
+
+    toncenter кладёт сырые байты такого комментария в поле message, и ответ
+    перестаёт быть корректным UTF-8. Раньше разбор падал с UnicodeDecodeError,
+    и на этот кошелёк не подтверждался ни один платёж — ни подписка, ни свой код.
+    """
+    import httpx as _httpx
+    import json as _json
+    from decimal import Decimal as _D
+    from app.services.ton import ToncenterClient, verify_payment
+
+    treasury = "0:" + "11" * 32
+    now = int(time.time())
+    payload = {
+        "ok": True,
+        "result": [
+            {
+                "utime": now,
+                "transaction_id": {"hash": "encrypted-hash"},
+                "in_msg": {
+                    "source": "0:" + "22" * 32,
+                    "destination": treasury,
+                    "value": "20000000",
+                    "message": "BROKEN_BYTES",
+                    "msg_data": {"@type": "msg.dataEncryptedText"},
+                },
+            },
+            {
+                "utime": now,
+                "transaction_id": {"hash": "paid-hash"},
+                "in_msg": {
+                    "source": "0:" + "33" * 32,
+                    "destination": treasury,
+                    "value": "200000000",
+                    "message": "tsb-paid",
+                    "msg_data": {"@type": "msg.dataText"},
+                },
+            },
+        ],
+    }
+    # байты не из UTF-8 — ровно то, что приходит в ответе на зашифрованный комментарий
+    body = _json.dumps(payload).encode().replace(b"BROKEN_BYTES", bytes([0x95, 0xFA, 0x0C, 0xFF]))
+
+    async def handler(request):
+        return _httpx.Response(200, content=body, headers={"Content-Type": "application/json"})
+
+    client = ToncenterClient(
+        client=_httpx.AsyncClient(transport=_httpx.MockTransport(handler), base_url="http://x")
+    )
+    result = await verify_payment(
+        tx_hash="a" * 64,
+        destination=treasury,
+        min_amount=_D("0.2"),
+        comment="tsb-paid",
+        client=client,
+    )
+    assert result.ok is True
+    assert result.tx is not None and result.tx.tx_hash == "paid-hash"

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import binascii
 import hashlib
 import logging
@@ -192,7 +193,16 @@ class ToncenterClient:
                 continue
             if resp.status_code >= 400:
                 raise TonApiError(f"TON API responded {resp.status_code}")
-            data = resp.json()
+            # Не resp.json(): toncenter кладёт в поле message сырые байты
+            # зашифрованных комментариев, и ответ перестаёт быть корректным
+            # UTF-8. Одного такого перевода на кошелёк проекта хватало, чтобы
+            # падала проверка вообще всех платежей. Наши комментарии — ASCII,
+            # замена чужих битых байтов их не задевает. strict=False — на случай,
+            # если среди этих байтов окажется неэкранированный управляющий символ.
+            try:
+                data = json.loads(resp.content.decode("utf-8", "replace"), strict=False)
+            except ValueError as exc:
+                raise TonApiError("TON API returned malformed JSON") from exc
             if isinstance(data, dict) and data.get("ok") is False:
                 raise TonApiError(str(data.get("error") or "TON API error"))
             return data.get("result") if isinstance(data, dict) else data
